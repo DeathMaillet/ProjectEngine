@@ -18,8 +18,8 @@ body:
     id: version
     attributes:
       label: ProjectEngine version
-      description: Example: v1.1.0
-      placeholder: v1.1.0
+      description: "Example: v1.1.0"
+      placeholder: "v1.1.0"
     validations:
       required: true
 
@@ -27,8 +27,8 @@ body:
     id: excel
     attributes:
       label: Excel version and language
-      description: Example: Microsoft 365, 64-bit, English
-      placeholder: Microsoft 365, 64-bit, English
+      description: "Example: Microsoft 365, 64-bit, English"
+      placeholder: "Microsoft 365, 64-bit, English"
     validations:
       required: true
 
@@ -55,7 +55,7 @@ body:
     id: expected
     attributes:
       label: Expected result
-      description: What should have happened?
+      description: "What should have happened?"
     validations:
       required: true
 
@@ -63,7 +63,7 @@ body:
     id: actual
     attributes:
       label: Actual result
-      description: What happened instead?
+      description: "What happened instead?"
     validations:
       required: true
 
@@ -71,7 +71,7 @@ body:
     id: reproduce
     attributes:
       label: Reproduction steps
-      description: Provide the smallest sequence that reliably reproduces the problem.
+      description: "Provide the smallest sequence that reliably reproduces the problem."
       placeholder: |
         1. Open...
         2. Enter...
@@ -84,13 +84,13 @@ body:
     id: sample
     attributes:
       label: Anonymized example or screenshots
-      description: Add a small non-confidential example, screenshot, or relevant diagnostic message.
+      description: "Add a small non-confidential example, screenshot, or relevant diagnostic message."
 
   - type: textarea
     id: additional
     attributes:
       label: Additional context
-      description: Include anything else that may help isolate the problem.
+      description: "Include anything else that may help isolate the problem."
 
   - type: checkboxes
     id: checks

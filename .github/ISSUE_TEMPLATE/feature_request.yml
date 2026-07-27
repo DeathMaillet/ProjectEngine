@@ -15,8 +15,8 @@ body:
     id: context
     attributes:
       label: Project or industry context
-      description: Example: EPC, construction, manufacturing, PMO, software delivery
-      placeholder: EPC / construction
+      description: "Example: EPC, construction, manufacturing, PMO, software delivery"
+      placeholder: "EPC / construction"
     validations:
       required: true
 
@@ -24,7 +24,7 @@ body:
     id: problem
     attributes:
       label: Planning problem
-      description: What are you trying to accomplish, and why is the current workflow insufficient?
+      description: "What are you trying to accomplish, and why is the current workflow insufficient?"
     validations:
       required: true
 
@@ -32,7 +32,7 @@ body:
     id: current
     attributes:
       label: Current workaround
-      description: How do you handle this today?
+      description: "How do you handle this today?"
     validations:
       required: true
 
@@ -40,7 +40,7 @@ body:
     id: outcome
     attributes:
       label: Useful outcome
-      description: What result would make the feature valuable?
+      description: "What result would make the feature valuable?"
     validations:
       required: true
 
@@ -66,7 +66,7 @@ body:
     id: compatibility
     attributes:
       label: Compatibility considerations
-      description: Would this change affect current workbooks, columns, callbacks, or workflows?
+      description: "Would this change affect current workbooks, columns, callbacks, or workflows?"
 
   - type: checkboxes
     id: checks
