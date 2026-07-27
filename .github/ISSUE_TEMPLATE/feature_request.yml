@@ -1,0 +1,79 @@
+name: Feature request
+description: Propose a capability grounded in a real planning workflow
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ProjectEngine development is driven by real planning needs.
+
+        Please describe the problem before describing the solution. For broad ideas or early discussion, use the dedicated GitHub Discussion first.
+
+  - type: input
+    id: context
+    attributes:
+      label: Project or industry context
+      description: Example: EPC, construction, manufacturing, PMO, software delivery
+      placeholder: EPC / construction
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Planning problem
+      description: What are you trying to accomplish, and why is the current workflow insufficient?
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workaround
+      description: How do you handle this today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Useful outcome
+      description: What result would make the feature valuable?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related area
+      options:
+        - Scheduling logic
+        - Dependencies / Calendars / Constraints
+        - Critical Path / Float / Analytics
+        - TEST / SCENARIO / LOCK / Reset
+        - Gantt / Drag & Drop
+        - Dashboard / Reporting
+        - S-Curve
+        - Import / Export / Integration
+        - Onboarding / Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Would this change affect current workbooks, columns, callbacks, or workflows?
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: This request is based on a real planning need.
+          required: true
+        - label: I searched existing Issues and Discussions for a similar request.
+          required: true

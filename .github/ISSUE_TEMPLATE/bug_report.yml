@@ -1,0 +1,105 @@
+name: Bug report
+description: Report a reproducible problem in ProjectEngine
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve ProjectEngine.
+
+        Before submitting:
+        - confirm that you are using the latest release;
+        - remove confidential or company-specific information;
+        - use a small anonymized example whenever possible.
+
+  - type: input
+    id: version
+    attributes:
+      label: ProjectEngine version
+      description: Example: v1.1.0
+      placeholder: v1.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: excel
+    attributes:
+      label: Excel version and language
+      description: Example: Microsoft 365, 64-bit, English
+      placeholder: Microsoft 365, 64-bit, English
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - WBS / Inputs
+        - Scheduling engine
+        - Critical Path / Float / Analytics
+        - TEST / SCENARIO / LOCK / Reset
+        - Gantt rendering
+        - Drag & Drop
+        - Dashboard
+        - S-Curve
+        - Diagnostics / Messages
+        - Localization
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest sequence that reliably reproduces the problem.
+      placeholder: |
+        1. Open...
+        2. Enter...
+        3. Click...
+        4. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Anonymized example or screenshots
+      description: Add a small non-confidential example, screenshot, or relevant diagnostic message.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Include anything else that may help isolate the problem.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I tested the latest available release.
+          required: true
+        - label: I removed confidential and company-specific information.
+          required: true
+        - label: I searched existing Issues and Discussions for the same problem.
+          required: true
