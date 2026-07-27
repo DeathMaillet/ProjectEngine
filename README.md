@@ -338,7 +338,9 @@ The project remains actively maintained. Future development is driven by real pl
 - [Latest release](https://github.com/TMailletFR/ProjectEngine/releases/latest)
 - [All releases](https://github.com/TMailletFR/ProjectEngine/releases)
 - [Open issues](https://github.com/TMailletFR/ProjectEngine/issues)
-- [Start a discussion](https://github.com/TMailletFR/ProjectEngine/discussions)
+- [Questions, feedback and real-world use cases](https://github.com/TMailletFR/ProjectEngine/discussions/2)
+- [Suggest what ProjectEngine should support next](https://github.com/TMailletFR/ProjectEngine/discussions/3)
+- [Getting started and setup questions](https://github.com/TMailletFR/ProjectEngine/discussions/4)
 
 ---
 
@@ -355,7 +357,12 @@ Useful contributions include:
 - a performance issue on a large programme;
 - a feature you rely on in Microsoft Project or Primavera P6 but miss in Excel.
 
-Use [GitHub Issues](https://github.com/TMailletFR/ProjectEngine/issues) for reproducible problems and feature requests, or [GitHub Discussions](https://github.com/TMailletFR/ProjectEngine/discussions) for broader planning questions and ideas.
+Choose the most useful entry point:
+
+- [Questions, feedback and real-world use cases](https://github.com/TMailletFR/ProjectEngine/discussions/2) for general discussion and experience reports;
+- [What should ProjectEngine support next?](https://github.com/TMailletFR/ProjectEngine/discussions/3) for missing workflows and feature ideas;
+- [Getting started with ProjectEngine](https://github.com/TMailletFR/ProjectEngine/discussions/4) for setup, inputs and first-use questions;
+- [GitHub Issues](https://github.com/TMailletFR/ProjectEngine/issues) for reproducible bugs and changes that need formal tracking.
 
 When reporting an issue, remove confidential or company-specific data before sharing any workbook or screenshot.
 
