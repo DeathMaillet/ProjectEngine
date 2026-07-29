@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://tmailletfr.github.io/ProjectEngine/sitemap.xml

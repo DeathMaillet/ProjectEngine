@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjectEngine for Excel — Open-source scheduling and project controls engine</title>
+  <meta name="description" content="ProjectEngine is an open-source, dependency-driven scheduling and project controls engine for Microsoft Excel. Critical Path, float, simulation, Drag & Drop, Gantt, dashboards and S-Curves — all inside Excel.">
+  <meta name="keywords" content="Excel scheduling engine, open source Excel Gantt, Critical Path Excel, VBA scheduling engine, project controls Excel, Microsoft Project alternative Excel, dependency-driven scheduling">
+  <meta name="author" content="Thibaut Maillet">
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <meta name="theme-color" content="#07152a">
+
+  <link rel="canonical" href="https://tmailletfr.github.io/ProjectEngine/">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ProjectEngine for Excel — Real scheduling. Native Excel.">
+  <meta property="og:description" content="An open-source, dependency-driven scheduling and project controls engine for Microsoft Excel.">
+  <meta property="og:url" content="https://tmailletfr.github.io/ProjectEngine/">
+  <meta property="og:image" content="https://tmailletfr.github.io/ProjectEngine/assets/social-preview.jpg">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ProjectEngine for Excel">
+  <meta name="twitter:description" content="Real scheduling. Native Excel.">
+  <meta name="twitter:image" content="https://tmailletfr.github.io/ProjectEngine/assets/social-preview.jpg">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ProjectEngine",
+    "alternateName": "ProjectEngine for Excel",
+    "applicationCategory": "BusinessApplication",
+    "applicationSubCategory": "Project scheduling and project controls",
+    "operatingSystem": "Microsoft Windows",
+    "softwareRequirements": "Microsoft Excel with VBA macros enabled",
+    "description": "Open-source, dependency-driven scheduling and project controls engine for Microsoft Excel.",
+    "url": "https://tmailletfr.github.io/ProjectEngine/",
+    "downloadUrl": "https://github.com/TMailletFR/ProjectEngine/releases/latest",
+    "codeRepository": "https://github.com/TMailletFR/ProjectEngine",
+    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+    "author": {
+      "@type": "Person",
+      "name": "Thibaut Maillet",
+      "url": "https://github.com/TMailletFR"
+    },
+    "featureList": [
+      "Dependency-driven scheduling with FS, SS and FF relationships",
+      "Critical Path and Longest Path analysis",
+      "Total Float and Free Float",
+      "Live TEST and Drag & Drop simulation",
+      "Interactive Gantt chart",
+      "Executive dashboards",
+      "S-Curve analysis",
+      "English and French onboarding"
+    ]
+  }
+  </script>
+</head>
+
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container nav-wrap">
+      <a class="brand" href="#top" aria-label="ProjectEngine home">
+        <span class="brand-mark">PE</span>
+        <span>ProjectEngine</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#features">Features</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#screens">Screens</a>
+        <a href="https://github.com/TMailletFR/ProjectEngine/tree/main/Docs/en">Docs</a>
+      </nav>
+      <a class="button button-small" href="https://github.com/TMailletFR/ProjectEngine/releases/latest">Download</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">OPEN-SOURCE · MICROSOFT EXCEL · VBA</div>
+          <h1>Real scheduling.<br><span>Native Excel.</span></h1>
+          <p class="hero-lead">
+            A dependency-driven scheduling and project controls engine for teams that need more than a static Excel Gantt chart.
+          </p>
+          <div class="hero-actions">
+            <a class="button" href="https://github.com/TMailletFR/ProjectEngine/releases/latest">Download the latest release</a>
+            <a class="button button-secondary" href="https://github.com/TMailletFR/ProjectEngine">View on GitHub</a>
+          </div>
+          <div class="trust-row" aria-label="Project characteristics">
+            <span>GPL-3.0</span>
+            <span>No installer</span>
+            <span>English & French</span>
+            <span>Excel-native</span>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <img src="assets/dashboard.png" alt="ProjectEngine executive dashboard in Excel" width="1200" height="675">
+        </div>
+      </div>
+    </section>
+
+    <section class="proof strip">
+      <div class="container proof-grid">
+        <div>
+          <strong>Not a template.</strong>
+          <span>A real scheduling engine.</span>
+        </div>
+        <div>
+          <strong>Not a disconnected dashboard.</strong>
+          <span>One calculated planning model.</span>
+        </div>
+        <div>
+          <strong>Not another mandatory application.</strong>
+          <span>It runs inside Excel.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="demo">
+      <div class="container narrow center">
+        <div class="eyebrow">LIVE SIMULATION</div>
+        <h2>Move one activity. See the whole schedule react.</h2>
+        <p class="section-lead">
+          Drag a task, propagate the dependency network, recalculate the Critical Path and float, then return safely to the last calculated plan with Reset.
+        </p>
+      </div>
+      <div class="container demo-frame">
+        <img src="assets/live-simulation.gif" alt="ProjectEngine live Gantt simulation showing Drag and Drop, dependency propagation, Critical Path recalculation and Reset" loading="lazy">
+      </div>
+    </section>
+
+    <section class="section section-alt" id="features">
+      <div class="container narrow center">
+        <div class="eyebrow">SCHEDULING, NOT DECORATION</div>
+        <h2>What ProjectEngine calculates</h2>
+        <p class="section-lead">
+          The Gantt, analytics, Dashboard and S-Curve consume the same calculated planning data.
+        </p>
+      </div>
+
+      <div class="container cards">
+        <article class="card">
+          <div class="icon">↗</div>
+          <h3>Dependency-driven scheduling</h3>
+          <p>FS, SS and FF relationships, positive or negative lags, multiple predecessors, calendars, milestones, constraints and automatic propagation.</p>
+        </article>
+        <article class="card">
+          <div class="icon">◎</div>
+          <h3>Critical Path and float</h3>
+          <p>Critical Path, Longest Path, Total Float, Free Float, Driving Logic, variance, deadlines and multi-project criticality.</p>
+        </article>
+        <article class="card">
+          <div class="icon">⟳</div>
+          <h3>Controlled simulation</h3>
+          <p>Non-destructive TEST, complete SCENARIO alternatives, live Drag & Drop analytics, safe Reset and controlled LOCK.</p>
+        </article>
+        <article class="card">
+          <div class="icon">!</div>
+          <h3>Planning diagnostics</h3>
+          <p>Structured INFO, WARNING and STOP messages for missing predecessors, cycles, invalid constraints and inconsistent planning inputs.</p>
+        </article>
+        <article class="card">
+          <div class="icon">▥</div>
+          <h3>Interactive Gantt</h3>
+          <p>Day, Week and Month scales, summaries, milestones, LOE tasks, dependencies, constraints, progress and path overlays.</p>
+        </article>
+        <article class="card">
+          <div class="icon">∿</div>
+          <h3>Project controls reporting</h3>
+          <p>Executive Dashboard, Hot Spots, Baseline/Actual/Forecast/Calculated S-Curves and time-phased workload distribution.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="workflow">
+      <div class="container workflow-grid">
+        <div>
+          <div class="eyebrow">A CONTROLLED WORKFLOW</div>
+          <h2>From WBS inputs to a validated schedule</h2>
+          <p class="section-lead left">
+            ProjectEngine separates user inputs, calculation, analytics, diagnostics, simulation and publication so the workbook remains understandable and testable.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Build the WBS</strong><p>Enter hierarchy, dates, durations, progress, calendars and dependencies.</p></div></li>
+            <li><span>2</span><div><strong>Run Planning Update</strong><p>Calculate dates, rollups, constraints, paths, floats and diagnostics.</p></div></li>
+            <li><span>3</span><div><strong>Review the result</strong><p>Use the Gantt, analytics, Dashboard and S-Curve.</p></div></li>
+            <li><span>4</span><div><strong>Test alternatives</strong><p>Simulate focused changes or complete scenarios before committing them.</p></div></li>
+            <li><span>5</span><div><strong>Lock or Reset</strong><p>Apply validated results or return safely to the calculated plan.</p></div></li>
+          </ol>
+        </div>
+        <aside class="fit-panel">
+          <h3>Where it fits</h3>
+          <p>ProjectEngine is designed for teams that already work in Excel and need genuine scheduling capabilities without introducing another application.</p>
+          <ul>
+            <li>Planning engineers and schedulers</li>
+            <li>Project controls and PMO teams</li>
+            <li>Project managers working in Excel</li>
+            <li>EPC, construction and infrastructure</li>
+            <li>Manufacturing and industrial programmes</li>
+          </ul>
+          <p class="fit-note">It does not claim to replace every enterprise capability of Microsoft Project or Primavera P6.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="screens">
+      <div class="container narrow center">
+        <div class="eyebrow">ONE PLANNING MODEL</div>
+        <h2>Analytics and reporting stay aligned</h2>
+      </div>
+      <div class="container screenshot-grid">
+        <figure>
+          <img src="assets/analytics.png" alt="ProjectEngine planning analytics in Excel" loading="lazy">
+          <figcaption>Critical Path, Longest Path, float, variance and Driving Logic.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/s-curve.png" alt="ProjectEngine S-Curve analysis in Excel" loading="lazy">
+          <figcaption>Baseline, Actual, Forecast and Calculated progress.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section cta">
+      <div class="container cta-box">
+        <div>
+          <div class="eyebrow">READY TO TRY IT?</div>
+          <h2>Stop maintaining complex schedules by hand.</h2>
+          <p>Download the prepared macro-enabled workbook from the latest GitHub release.</p>
+        </div>
+        <div class="cta-actions">
+          <a class="button" href="https://github.com/TMailletFR/ProjectEngine/releases/latest">Download ProjectEngine</a>
+          <a class="text-link" href="https://github.com/TMailletFR/ProjectEngine/discussions/4">Ask a setup question →</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div>
+        <strong>ProjectEngine for Excel</strong>
+        <p>Open-source dependency-driven scheduling and project controls.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/TMailletFR/ProjectEngine">GitHub</a>
+        <a href="https://github.com/TMailletFR/ProjectEngine/releases/latest">Latest release</a>
+        <a href="https://github.com/TMailletFR/ProjectEngine/tree/main/Docs/en">Documentation</a>
+        <a href="https://github.com/TMailletFR/ProjectEngine/discussions">Discussions</a>
+      </div>
+      <div class="license">GNU GPL v3.0 · Built by Thibaut Maillet</div>
+    </div>
+  </footer>
+</body>
+</html>
