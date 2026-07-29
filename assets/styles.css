@@ -508,3 +508,65 @@ footer {
   color: var(--muted);
   font-size: .92rem;
 }
+
+
+/* v3: explicit hero colours and stronger layout rules */
+.hero-title .hero-title-line {
+  display: block !important;
+  white-space: nowrap !important;
+}
+
+.hero-title .hero-title-line:first-child {
+  color: var(--text) !important;
+}
+
+.hero-title .hero-title-accent {
+  color: var(--accent-2) !important;
+}
+
+/* Keep the two-part slogan readable without forcing an oversized first line. */
+@media (min-width: 901px) {
+  .hero-title {
+    font-size: clamp(3rem, 4.25vw, 4.75rem) !important;
+  }
+}
+
+/* Explicitly centre the right panel within the full workflow row. */
+@media (min-width: 901px) {
+  .workflow-grid {
+    align-items: center !important;
+  }
+
+  .fit-panel {
+    align-self: center !important;
+  }
+}
+
+/* Never stretch either screenshot card to match the other card's height. */
+.screenshot-grid {
+  align-items: start !important;
+}
+
+.screenshot-grid figure {
+  height: fit-content !important;
+  align-self: start !important;
+}
+
+.screenshot-grid figure img {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
+  object-fit: contain !important;
+}
+
+/* Keep the intended two-line slogan on landscape phones/tablets too. */
+@media (min-width: 471px) and (max-width: 900px) {
+  .hero-title {
+    font-size: clamp(2.5rem, 7vw, 3.7rem) !important;
+  }
+
+  .hero-title .hero-title-line {
+    white-space: nowrap !important;
+  }
+}

@@ -36,3 +36,8 @@ The site is a plain static site. No build process, package manager or dependency
 - Workflow fit panel vertically centered.
 - Analytics and S-Curve cards retain their natural image ratios.
 - Download CTAs use `download.html`, which resolves the `.xlsm` asset from the latest GitHub release dynamically.
+
+
+## v3 correction
+
+The stylesheet URL now carries a version query (`styles.css?v=3`) so GitHub Pages and browsers do not keep serving the older cached CSS. Explicit hero colours and stronger desktop/landscape layout rules were also added.
