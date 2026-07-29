@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#07152a">
+  <title>Downloading ProjectEngine…</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <main class="section">
+    <div class="container narrow center">
+      <div class="eyebrow">LATEST STABLE RELEASE</div>
+      <h1 class="download-title">Preparing your ProjectEngine download…</h1>
+      <p class="section-lead" id="download-status">
+        The latest macro-enabled Excel workbook is being located on GitHub.
+      </p>
+
+      <div class="hero-actions download-actions">
+        <a class="button" id="manual-download"
+           href="https://github.com/TMailletFR/ProjectEngine/releases/latest">
+          Open the latest release
+        </a>
+        <a class="button button-secondary"
+           href="https://tmailletfr.github.io/ProjectEngine/">
+          Return to the website
+        </a>
+      </div>
+
+      <p class="download-note">
+        Only the prepared <code>.xlsm</code> release asset is selected.
+        GitHub's automatically generated source archives are not used.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const apiUrl =
+        "https://api.github.com/repos/TMailletFR/ProjectEngine/releases/latest";
+      const status = document.getElementById("download-status");
+      const manual = document.getElementById("manual-download");
+
+      fetch(apiUrl, {
+        headers: {
+          "Accept": "application/vnd.github+json"
+        }
+      })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`GitHub API returned ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(release => {
+          const workbook = (release.assets || []).find(asset =>
+            asset.name.toLowerCase().endsWith(".xlsm")
+          );
+
+          if (!workbook || !workbook.browser_download_url) {
+            throw new Error("No .xlsm asset was found in the latest release.");
+          }
+
+          status.textContent =
+            `Downloading ${workbook.name} from ${release.tag_name}…`;
+          manual.href = workbook.browser_download_url;
+          manual.textContent = `Download ${workbook.name}`;
+
+          window.location.replace(workbook.browser_download_url);
+        })
+        .catch(error => {
+          console.error(error);
+          status.textContent =
+            "The automatic download could not start. Open the latest release below.";
+        });
+    })();
+  </script>
+</body>
+</html>

@@ -437,3 +437,74 @@ footer {
   .footer-grid { grid-template-columns: 1fr; }
   .footer-links { flex-direction: column; gap: 8px; }
 }
+
+
+/* v2 layout corrections */
+
+/* Keep the slogan visually and semantically in two beats on desktop. */
+.hero-title {
+  font-size: clamp(3rem, 4.9vw, 5.15rem);
+  line-height: 1.04;
+  letter-spacing: -.055em;
+  margin-bottom: 25px;
+}
+
+.hero-title-line {
+  display: block;
+  white-space: nowrap;
+}
+
+.hero-title-accent {
+  color: var(--accent-2);
+}
+
+/* Vertically centre the fit panel against the complete workflow block. */
+.workflow-grid {
+  align-items: center;
+}
+
+/* Prevent the shorter S-Curve card from stretching to the analytics card height. */
+.screenshot-grid {
+  align-items: start;
+}
+
+.screenshot-grid figure {
+  align-self: start;
+  height: auto;
+}
+
+.screenshot-grid figure img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+/* Preserve the two-line slogan until the mobile layout becomes genuinely narrow. */
+@media (max-width: 760px) {
+  .hero-title {
+    font-size: clamp(2.65rem, 10.5vw, 4.2rem);
+  }
+}
+
+@media (max-width: 470px) {
+  .hero-title-line {
+    white-space: normal;
+  }
+}
+
+
+.download-title {
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  margin-bottom: 22px;
+}
+
+.download-actions {
+  justify-content: center;
+  margin-top: 34px;
+}
+
+.download-note {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: .92rem;
+}
