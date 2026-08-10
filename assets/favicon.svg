@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#35aee2"/><stop offset="1" stop-color="#1e6ccb"/></linearGradient></defs>
-<rect width="64" height="64" rx="18" fill="#07152a"/>
-<rect x="8" y="8" width="48" height="48" rx="14" fill="url(#g)"/>
-<text x="32" y="39" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#fff">PE</text>
-</svg>
