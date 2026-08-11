@@ -1,0 +1,53 @@
+name: Archive GitHub traffic privately
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+      timezone: "Europe/Paris"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ProjectEngine
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Check out private traffic archive
+        uses: actions/checkout@v4
+        with:
+          repository: TMailletFR/ProjectEngine-Traffic
+          token: ${{ secrets.TRAFFIC_ARCHIVE_TOKEN }}
+          path: archive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Read ProjectEngine traffic and update private archive
+        env:
+          TRAFFIC_READ_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
+          TRAFFIC_SOURCE_REPOSITORY: TMailletFR/ProjectEngine
+          TRAFFIC_ARCHIVE_DIR: ${{ github.workspace }}/archive
+        run: python source/scripts/archive_github_traffic.py
+
+      - name: Commit private archive if changed
+        working-directory: archive
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No archive changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Archive ProjectEngine traffic"
+          git push
