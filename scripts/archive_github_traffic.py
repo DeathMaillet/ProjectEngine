@@ -176,6 +176,76 @@ def combine_snapshot_history(current_rows, historical_rows, key_fields, value_fi
     return out
 
 
+def load_events(path: Path) -> list[dict[str, str]]:
+    rows = load_csv(path)
+    rows.sort(key=lambda r: (r.get("date", ""), r.get("category", ""), r.get("label", "")))
+    return rows
+
+
+def event_date_map(events: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
+    out = defaultdict(list)
+    for event in events:
+        if event.get("date"):
+            out[event["date"]].append(event)
+    return out
+
+
+def save_line_chart_with_events(
+    path: Path,
+    title: str,
+    x,
+    series: list[tuple[str, list[int]]],
+    ylabel: str,
+    events: list[dict[str, str]],
+):
+    if not x:
+        return
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for label, values in series:
+        ax.plot(x, values, marker="o", linewidth=2, label=label)
+
+    ymin, ymax = ax.get_ylim()
+    span = ymax - ymin if ymax > ymin else 1
+
+    plotted_dates = set()
+    for event in events:
+        if str(event.get("plot", "1")).strip() not in ("1", "true", "True", "yes", "YES"):
+            continue
+        try:
+            ed = dt.strptime(event["date"], "%Y-%m-%d")
+        except Exception:
+            continue
+        if ed < min(x) or ed > max(x):
+            continue
+
+        ax.axvline(ed, linestyle="--", linewidth=1, alpha=0.45)
+
+        # Stagger labels when several events share nearby dates.
+        key = event["date"]
+        n = sum(1 for d in plotted_dates if abs((dt.strptime(d, "%Y-%m-%d") - ed).days) <= 1)
+        y = ymax - span * (0.05 + 0.08 * (n % 4))
+        short = event.get("short_label") or event.get("label") or event.get("category") or "Event"
+        ax.text(
+            ed, y, short,
+            rotation=90,
+            va="top",
+            ha="right",
+            fontsize=8,
+            alpha=0.85,
+        )
+        plotted_dates.add(key)
+
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
 now = datetime.now(timezone.utc).replace(microsecond=0)
 snapshot_utc = now.isoformat()
 snapshot_date = now.date().isoformat()
@@ -188,6 +258,8 @@ charts_dir = archive_dir / "charts"
 
 for d in (data_dir, historical_dir, derived_dir, raw_dir, charts_dir):
     d.mkdir(parents=True, exist_ok=True)
+
+events = load_events(data_dir / "events.csv")
 
 # ----------------------------------------------------------------------
 # 1) Fetch canonical current GitHub traffic
@@ -383,7 +455,7 @@ write_csv(
 # 3) Charts
 # ----------------------------------------------------------------------
 
-save_line_chart(
+save_line_chart_with_events(
     charts_dir / "daily_views.png",
     "ProjectEngine — daily repository traffic (historical + API)",
     parse_dates(combined_views),
@@ -392,9 +464,10 @@ save_line_chart(
         ("Unique visitors", ints(combined_views, "unique_visitors")),
     ],
     "Count",
+    events,
 )
 
-save_line_chart(
+save_line_chart_with_events(
     charts_dir / "daily_clones.png",
     "ProjectEngine — daily clones (historical + API)",
     parse_dates(combined_clones),
@@ -403,6 +476,7 @@ save_line_chart(
         ("Unique cloners", ints(combined_clones, "unique_cloners")),
     ],
     "Count",
+    events,
 )
 
 valid_rollups = [r for r in combined_rollups if r.get("rolling_views", "") != ""]
@@ -596,6 +670,12 @@ This graph combines exact values transcribed from old GitHub Traffic tables with
 ## Most visited repository content
 
 ![Popular paths](charts/latest_paths.png)
+
+## Communication & product events
+
+The repository also contains [`data/events.csv`](data/events.csv), our communication / release / infrastructure timeline.
+
+Events marked `plot=1` are drawn directly on the daily traffic and clone charts so traffic spikes can be compared with releases and communication actions.
 
 ## Data layout
 
