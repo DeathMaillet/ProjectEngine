@@ -15,19 +15,19 @@ jobs:
 
     steps:
       - name: Check out ProjectEngine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: source
 
       - name: Check out private traffic archive
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: TMailletFR/ProjectEngine-Traffic
           token: ${{ secrets.TRAFFIC_ARCHIVE_TOKEN }}
           path: archive
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
@@ -48,6 +48,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add .
           git commit -m "Archive ProjectEngine traffic"
           git push
