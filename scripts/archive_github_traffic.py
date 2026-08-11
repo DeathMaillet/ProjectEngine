@@ -51,7 +51,7 @@ def api_get(path: str):
 def load_csv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
-    with path.open("r", newline="", encoding="utf-8") as handle:
+    with path.open("r", newline="", encoding="utf-8-sig") as handle:
         return list(csv.DictReader(handle))
 
 
@@ -79,18 +79,25 @@ def upsert_rows(path: Path, fields: list[str], incoming: list[dict], key_fields:
     write_csv(path, fields, rows)
 
 
-def ints(rows, field):
-    return [int(r.get(field, "0") or 0) for r in rows]
+def as_int(value) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return 0
 
 
-def dates(rows, field="date"):
+def parse_dates(rows, field="date"):
     return [dt.strptime(r[field], "%Y-%m-%d") for r in rows]
+
+
+def ints(rows, field):
+    return [as_int(r.get(field, 0)) for r in rows]
 
 
 def save_line_chart(path: Path, title: str, x, series: list[tuple[str, list[int]]], ylabel: str):
     if not x:
         return
-    fig, ax = plt.subplots(figsize=(11, 4.8))
+    fig, ax = plt.subplots(figsize=(12, 5.2))
     for label, values in series:
         ax.plot(x, values, marker="o", linewidth=2, label=label)
     ax.set_title(title)
@@ -124,16 +131,67 @@ def save_bar_chart(path: Path, title: str, labels: list[str], values: list[int],
     plt.close(fig)
 
 
+def merge_daily_history(api_rows, historical_rows, api_fields, hist_fields):
+    """
+    Merge historical reconstructed daily rows with canonical API rows.
+    API wins on overlapping dates.
+    """
+    merged = {}
+    for r in historical_rows:
+        d = r.get("date", "")
+        if not d:
+            continue
+        merged[d] = {
+            "date": d,
+            api_fields[0]: r.get(hist_fields[0], "0"),
+            api_fields[1]: r.get(hist_fields[1], "0"),
+            "provenance": r.get("provenance", "screenshot_reconstructed"),
+        }
+    for r in api_rows:
+        d = r.get("date", "")
+        if not d:
+            continue
+        merged[d] = {
+            "date": d,
+            api_fields[0]: r.get(api_fields[0], "0"),
+            api_fields[1]: r.get(api_fields[1], "0"),
+            "provenance": "api_exact",
+        }
+    return [merged[d] for d in sorted(merged)]
+
+
+def combine_snapshot_history(current_rows, historical_rows, key_fields, value_fields):
+    """
+    Historical rows are loaded first; canonical automatic rows overwrite exact key collisions.
+    """
+    merged = {}
+    for r in historical_rows:
+        key = tuple(r.get(k, "") for k in key_fields)
+        merged[key] = {k: r.get(k, "") for k in key_fields + value_fields}
+    for r in current_rows:
+        key = tuple(r.get(k, "") for k in key_fields)
+        merged[key] = {k: r.get(k, "") for k in key_fields + value_fields}
+    out = list(merged.values())
+    out.sort(key=lambda r: tuple(r.get(k, "") for k in key_fields))
+    return out
+
+
 now = datetime.now(timezone.utc).replace(microsecond=0)
 snapshot_utc = now.isoformat()
 snapshot_date = now.date().isoformat()
 
 data_dir = archive_dir / "data"
+historical_dir = data_dir / "historical"
+derived_dir = data_dir / "derived"
 raw_dir = data_dir / "raw"
 charts_dir = archive_dir / "charts"
-data_dir.mkdir(parents=True, exist_ok=True)
-raw_dir.mkdir(parents=True, exist_ok=True)
-charts_dir.mkdir(parents=True, exist_ok=True)
+
+for d in (data_dir, historical_dir, derived_dir, raw_dir, charts_dir):
+    d.mkdir(parents=True, exist_ok=True)
+
+# ----------------------------------------------------------------------
+# 1) Fetch canonical current GitHub traffic
+# ----------------------------------------------------------------------
 
 views = api_get("/views?per=day")
 clones = api_get("/clones?per=day")
@@ -244,43 +302,120 @@ write_csv(data_dir / "rolling_14d_snapshots.csv", rollup_fields, rollups)
     encoding="utf-8",
 )
 
-# ----- charts -----
+# ----------------------------------------------------------------------
+# 2) Build combined long-term datasets = recovered screenshots + API archive
+# ----------------------------------------------------------------------
 
-all_views = load_csv(data_dir / "daily_views.csv")
+hist_daily_views = load_csv(historical_dir / "daily_views_reconstructed.csv")
+hist_daily_clones = load_csv(historical_dir / "daily_clones_reconstructed.csv")
+
+combined_views = merge_daily_history(
+    load_csv(data_dir / "daily_views.csv"),
+    hist_daily_views,
+    ("views", "unique_visitors"),
+    ("views", "unique_visitors"),
+)
+write_csv(
+    derived_dir / "combined_daily_views.csv",
+    ["date", "views", "unique_visitors", "provenance"],
+    combined_views,
+)
+
+combined_clones = merge_daily_history(
+    load_csv(data_dir / "daily_clones.csv"),
+    hist_daily_clones,
+    ("clones", "unique_cloners"),
+    ("clones", "unique_cloners"),
+)
+write_csv(
+    derived_dir / "combined_daily_clones.csv",
+    ["date", "clones", "unique_cloners", "provenance"],
+    combined_clones,
+)
+
+hist_refs = load_csv(historical_dir / "referrers_snapshots.csv")
+hist_refs_normalized = [
+    {
+        "snapshot_date": r.get("snapshot_date", ""),
+        "referrer": r.get("referrer", ""),
+        "views": r.get("views", "0"),
+        "unique_visitors": r.get("unique_visitors", "0"),
+    }
+    for r in hist_refs
+]
+combined_refs = combine_snapshot_history(
+    load_csv(data_dir / "referrers_history.csv"),
+    hist_refs_normalized,
+    ["snapshot_date", "referrer"],
+    ["views", "unique_visitors"],
+)
+write_csv(
+    derived_dir / "combined_referrers_history.csv",
+    ["snapshot_date", "referrer", "views", "unique_visitors"],
+    combined_refs,
+)
+
+hist_rollups = load_csv(historical_dir / "rolling_14d_snapshots.csv")
+hist_rollups_normalized = [
+    {
+        "snapshot_date": r.get("snapshot_date", ""),
+        "snapshot_utc": "",
+        "rolling_views": r.get("rolling_views", ""),
+        "rolling_unique_visitors": r.get("rolling_unique_visitors", ""),
+        "rolling_clones": r.get("rolling_clones", ""),
+        "rolling_unique_cloners": r.get("rolling_unique_cloners", ""),
+    }
+    for r in hist_rollups
+]
+combined_rollups = combine_snapshot_history(
+    load_csv(data_dir / "rolling_14d_snapshots.csv"),
+    hist_rollups_normalized,
+    ["snapshot_date"],
+    ["snapshot_utc", "rolling_views", "rolling_unique_visitors", "rolling_clones", "rolling_unique_cloners"],
+)
+write_csv(
+    derived_dir / "combined_rolling_14d_snapshots.csv",
+    rollup_fields,
+    combined_rollups,
+)
+
+# ----------------------------------------------------------------------
+# 3) Charts
+# ----------------------------------------------------------------------
+
 save_line_chart(
     charts_dir / "daily_views.png",
-    "ProjectEngine — daily repository traffic",
-    dates(all_views),
+    "ProjectEngine — daily repository traffic (historical + API)",
+    parse_dates(combined_views),
     [
-        ("Views", ints(all_views, "views")),
-        ("Unique visitors", ints(all_views, "unique_visitors")),
+        ("Views", ints(combined_views, "views")),
+        ("Unique visitors", ints(combined_views, "unique_visitors")),
     ],
     "Count",
 )
 
-all_clones = load_csv(data_dir / "daily_clones.csv")
 save_line_chart(
     charts_dir / "daily_clones.png",
-    "ProjectEngine — daily clones",
-    dates(all_clones),
+    "ProjectEngine — daily clones (historical + API)",
+    parse_dates(combined_clones),
     [
-        ("Clones", ints(all_clones, "clones")),
-        ("Unique cloners", ints(all_clones, "unique_cloners")),
+        ("Clones", ints(combined_clones, "clones")),
+        ("Unique cloners", ints(combined_clones, "unique_cloners")),
     ],
     "Count",
 )
 
-all_rollups = load_csv(data_dir / "rolling_14d_snapshots.csv")
-if len(all_rollups) >= 1:
+valid_rollups = [r for r in combined_rollups if r.get("rolling_views", "") != ""]
+if valid_rollups:
     save_line_chart(
         charts_dir / "rolling_14d.png",
         "ProjectEngine — rolling 14-day traffic",
-        [dt.strptime(r["snapshot_date"], "%Y-%m-%d") for r in all_rollups],
+        [dt.strptime(r["snapshot_date"], "%Y-%m-%d") for r in valid_rollups],
         [
-            ("Views", ints(all_rollups, "rolling_views")),
-            ("Unique visitors", ints(all_rollups, "rolling_unique_visitors")),
-            ("Clones", ints(all_rollups, "rolling_clones")),
-            ("Unique cloners", ints(all_rollups, "rolling_unique_cloners")),
+            ("Views", ints(valid_rollups, "rolling_views")),
+            ("Unique visitors", ints(valid_rollups, "rolling_unique_visitors")),
+            ("Clones", ints(valid_rollups, "rolling_clones")),
+            ("Unique cloners", ints(valid_rollups, "rolling_unique_cloners")),
         ],
         "Count",
     )
@@ -303,40 +438,118 @@ save_bar_chart(
     "Unique visitors in GitHub rolling window",
 )
 
-# Per-source history: the values are rolling-window snapshots, not exact daily referrals.
-hist_refs = load_csv(data_dir / "referrers_history.csv")
-sources = defaultdict(list)
-all_snapshot_dates = sorted({r["snapshot_date"] for r in hist_refs})
-for source in sorted({r["referrer"] for r in hist_refs}):
-    by_date = {r["snapshot_date"]: int(r["unique_visitors"] or 0)
-               for r in hist_refs if r["referrer"] == source}
-    values = [by_date.get(d, 0) for d in all_snapshot_dates]
-    sources[source] = values
+# Referrer evolution across all recovered + current snapshots
+sources = defaultdict(dict)
+all_snapshot_dates = sorted({r["snapshot_date"] for r in combined_refs if r.get("snapshot_date")})
+for r in combined_refs:
+    source = r.get("referrer", "")
+    if source:
+        sources[source][r["snapshot_date"]] = as_int(r.get("unique_visitors", 0))
 
 if all_snapshot_dates:
     ranked_sources = sorted(
         sources,
-        key=lambda s: max(sources[s]) if sources[s] else 0,
+        key=lambda s: max(sources[s].values()) if sources[s] else 0,
         reverse=True
     )[:8]
+
+    # Missing source on a GitHub top-referrers table is represented as 0 for visualization.
     save_line_chart(
         charts_dir / "referrers_history.png",
-        "Referrer evolution — rolling-window snapshots",
+        "Referrer evolution — recovered + API rolling snapshots",
         [dt.strptime(d, "%Y-%m-%d") for d in all_snapshot_dates],
-        [(s, sources[s]) for s in ranked_sources],
+        [
+            (s, [sources[s].get(d, 0) for d in all_snapshot_dates])
+            for s in ranked_sources
+        ],
         "Unique visitors in GitHub rolling window",
     )
 
-# ----- private README dashboard -----
+# ----------------------------------------------------------------------
+# 4) Metadata based on all known exact referrer snapshots
+# ----------------------------------------------------------------------
 
-latest_views = int(views.get("count", 0) or 0)
-latest_unique = int(views.get("uniques", 0) or 0)
-latest_clones = int(clones.get("count", 0) or 0)
-latest_unique_cloners = int(clones.get("uniques", 0) or 0)
+metadata_first_seen = []
+metadata_peaks = []
+metadata_deltas = []
+
+for source in sorted(sources):
+    rows = [
+        r for r in combined_refs
+        if r.get("referrer") == source
+    ]
+    rows.sort(key=lambda r: r.get("snapshot_date", ""))
+    if not rows:
+        continue
+
+    first = rows[0]
+    metadata_first_seen.append({
+        "referrer": source,
+        "first_seen_snapshot": first["snapshot_date"],
+        "rolling_views": first.get("views", "0"),
+        "rolling_unique_visitors": first.get("unique_visitors", "0"),
+    })
+
+    peak_v = max(rows, key=lambda r: as_int(r.get("views")))
+    peak_u = max(rows, key=lambda r: as_int(r.get("unique_visitors")))
+    metadata_peaks.append({
+        "referrer": source,
+        "peak_rolling_views": peak_v.get("views", "0"),
+        "peak_views_snapshot": peak_v.get("snapshot_date", ""),
+        "peak_rolling_unique_visitors": peak_u.get("unique_visitors", "0"),
+        "peak_uniques_snapshot": peak_u.get("snapshot_date", ""),
+    })
+
+    prev = None
+    for r in rows:
+        if prev is not None:
+            metadata_deltas.append({
+                "snapshot_date": r.get("snapshot_date", ""),
+                "referrer": source,
+                "rolling_views": r.get("views", "0"),
+                "rolling_unique_visitors": r.get("unique_visitors", "0"),
+                "delta_views_vs_previous_snapshot": as_int(r.get("views")) - as_int(prev.get("views")),
+                "delta_uniques_vs_previous_snapshot": as_int(r.get("unique_visitors")) - as_int(prev.get("unique_visitors")),
+                "previous_snapshot_date": prev.get("snapshot_date", ""),
+                "note": "Net change in rolling GitHub snapshot; not exact daily referrals.",
+            })
+        prev = r
+
+write_csv(
+    derived_dir / "referrer_first_seen.csv",
+    ["referrer", "first_seen_snapshot", "rolling_views", "rolling_unique_visitors"],
+    metadata_first_seen,
+)
+write_csv(
+    derived_dir / "referrer_peaks.csv",
+    ["referrer", "peak_rolling_views", "peak_views_snapshot", "peak_rolling_unique_visitors", "peak_uniques_snapshot"],
+    metadata_peaks,
+)
+write_csv(
+    derived_dir / "referrer_snapshot_deltas.csv",
+    [
+        "snapshot_date", "referrer", "rolling_views", "rolling_unique_visitors",
+        "delta_views_vs_previous_snapshot", "delta_uniques_vs_previous_snapshot",
+        "previous_snapshot_date", "note"
+    ],
+    metadata_deltas,
+)
+
+# ----------------------------------------------------------------------
+# 5) Private README dashboard
+# ----------------------------------------------------------------------
+
+latest_views = as_int(views.get("count", 0))
+latest_unique = as_int(views.get("uniques", 0))
+latest_clones = as_int(clones.get("count", 0))
+latest_unique_cloners = as_int(clones.get("uniques", 0))
+
+first_daily_date = combined_views[0]["date"] if combined_views else "n/a"
+last_daily_date = combined_views[-1]["date"] if combined_views else "n/a"
 
 readme = f"""# ProjectEngine Traffic Archive
 
-Private long-term traffic archive for `TMailletFR/ProjectEngine`.
+Private long-term GitHub traffic archive for `TMailletFR/ProjectEngine`.
 
 _Last updated: {snapshot_utc}_
 
@@ -349,15 +562,22 @@ _Last updated: {snapshot_utc}_
 | Clones | **{latest_clones}** |
 | Unique cloners | **{latest_unique_cloners}** |
 
-## Daily traffic
+## Long-term daily traffic
+
+Recovered historical screenshots are merged with the automatic API archive for the charts below.
+On overlapping dates, API data always has priority.
+
+Coverage currently starts on **{first_daily_date}** and runs through **{last_daily_date}** where data is available.
 
 ![Daily views](charts/daily_views.png)
 
-## Daily clones
+## Long-term daily clones
 
 ![Daily clones](charts/daily_clones.png)
 
 ## Rolling 14-day trend
+
+This chart now includes recovered historical GitHub snapshots as well as the automatic archive.
 
 ![Rolling 14-day trend](charts/rolling_14d.png)
 
@@ -367,19 +587,27 @@ _Last updated: {snapshot_utc}_
 
 ## Referrer evolution
 
+This graph combines exact values transcribed from old GitHub Traffic tables with the daily automatic snapshots.
+
 ![Referrer history](charts/referrers_history.png)
 
-> Referrer values are GitHub rolling-window snapshots. They are not exact per-day attribution until enough history exists to reconstruct what entered and left the rolling window.
+> Referrer values are GitHub rolling-window snapshots. A change between two points is a net change of the 14-day window, not exact per-day attribution.
 
 ## Most visited repository content
 
 ![Popular paths](charts/latest_paths.png)
 
-## Raw data
+## Data layout
 
-The permanent datasets are stored under [`data/`](data/), including daily views, daily clones, referrer snapshots, popular-path snapshots and raw API responses.
+- [`data/daily_views.csv`](data/daily_views.csv): canonical automatic API archive
+- [`data/daily_clones.csv`](data/daily_clones.csv): canonical automatic API archive
+- [`data/referrers_history.csv`](data/referrers_history.csv): canonical automatic referrer snapshots
+- [`data/historical/`](data/historical/): manually recovered historical screenshots
+- [`data/derived/`](data/derived/): merged long-term datasets and metadata generated automatically
+
+The historical reconstruction is kept separate from canonical API data so its provenance remains explicit.
 """
 
 (archive_dir / "README.md").write_text(readme, encoding="utf-8")
 
-print(f"Archived and rendered private dashboard for {repo} at {snapshot_utc}")
+print(f"Archived ProjectEngine traffic and rendered merged historical dashboard at {snapshot_utc}")
