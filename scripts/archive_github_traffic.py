@@ -94,12 +94,45 @@ def ints(rows, field):
     return [as_int(r.get(field, 0)) for r in rows]
 
 
-def save_line_chart(path: Path, title: str, x, series: list[tuple[str, list[int]]], ylabel: str):
+def break_series_on_gaps(x, values, max_gap_days=2):
+    """
+    Insert NaN separators whenever consecutive observations are farther apart
+    than max_gap_days. This prevents Matplotlib from drawing a fake continuous
+    line across periods where no traffic data was captured.
+    """
+    if not x:
+        return [], []
+
+    broken_x = [x[0]]
+    broken_values = [values[0]]
+
+    for i in range(1, len(x)):
+        gap_days = (x[i] - x[i - 1]).days
+        if gap_days > max_gap_days:
+            broken_x.append(x[i - 1] + (x[i] - x[i - 1]) / 2)
+            broken_values.append(float("nan"))
+        broken_x.append(x[i])
+        broken_values.append(values[i])
+
+    return broken_x, broken_values
+
+
+def save_line_chart(
+    path: Path,
+    title: str,
+    x,
+    series: list[tuple[str, list[int]]],
+    ylabel: str,
+    max_gap_days=None,
+):
     if not x:
         return
     fig, ax = plt.subplots(figsize=(12, 5.2))
     for label, values in series:
-        ax.plot(x, values, marker="o", linewidth=2, label=label)
+        plot_x, plot_values = x, values
+        if max_gap_days is not None:
+            plot_x, plot_values = break_series_on_gaps(x, values, max_gap_days=max_gap_days)
+        ax.plot(plot_x, plot_values, marker="o", linewidth=2, label=label)
     ax.set_title(title)
     ax.set_ylabel(ylabel)
     ax.grid(True, alpha=0.25)
@@ -197,12 +230,14 @@ def save_line_chart_with_events(
     series: list[tuple[str, list[int]]],
     ylabel: str,
     events: list[dict[str, str]],
+    max_gap_days=2,
 ):
     if not x:
         return
     fig, ax = plt.subplots(figsize=(14, 6))
     for label, values in series:
-        ax.plot(x, values, marker="o", linewidth=2, label=label)
+        plot_x, plot_values = break_series_on_gaps(x, values, max_gap_days=max_gap_days)
+        ax.plot(plot_x, plot_values, marker="o", linewidth=2, label=label)
 
     ymin, ymax = ax.get_ylim()
     span = ymax - ymin if ymax > ymin else 1
@@ -510,6 +545,7 @@ if valid_rollups:
             ("Unique cloners", ints(valid_rollups, "rolling_unique_cloners")),
         ],
         "Count",
+        max_gap_days=7,
     )
 
 latest_refs = sorted(referrers, key=lambda x: x["uniques"], reverse=True)
@@ -658,6 +694,7 @@ _Last updated: {snapshot_utc}_
 
 Recovered historical screenshots are merged with the automatic API archive for the charts below.
 On overlapping dates, API data always has priority.
+Visible gaps mean that no historical observation is available for that period; they are intentionally not interpreted as zero traffic.
 
 Coverage currently starts on **{first_daily_date}** and runs through **{last_daily_date}** where data is available.
 
@@ -670,6 +707,7 @@ Coverage currently starts on **{first_daily_date}** and runs through **{last_dai
 ## Rolling 14-day trend
 
 This chart now includes recovered historical GitHub snapshots as well as the automatic archive.
+Long gaps between historical snapshots are intentionally left unconnected rather than interpolated.
 
 ![Rolling 14-day trend](charts/rolling_14d.png)
 
