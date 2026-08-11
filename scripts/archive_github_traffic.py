@@ -207,7 +207,9 @@ def save_line_chart_with_events(
     ymin, ymax = ax.get_ylim()
     span = ymax - ymin if ymax > ymin else 1
 
-    plotted_dates = set()
+    # Group events sharing the same date onto ONE marker/label.
+    # This avoids collisions such as "v1.0.0" + "Reddit #1" on 16 Jul.
+    grouped_events = defaultdict(list)
     for event in events:
         if str(event.get("plot", "1")).strip() not in ("1", "true", "True", "yes", "YES"):
             continue
@@ -217,23 +219,39 @@ def save_line_chart_with_events(
             continue
         if ed < min(x) or ed > max(x):
             continue
+        grouped_events[event["date"]].append(event)
+
+    plotted_dates = []
+    for event_date in sorted(grouped_events):
+        ed = dt.strptime(event_date, "%Y-%m-%d")
+        same_day = grouped_events[event_date]
 
         ax.axvline(ed, linestyle="--", linewidth=1, alpha=0.45)
 
-        # Stagger labels when several events share nearby dates.
-        key = event["date"]
-        n = sum(1 for d in plotted_dates if abs((dt.strptime(d, "%Y-%m-%d") - ed).days) <= 1)
-        y = ymax - span * (0.05 + 0.08 * (n % 4))
-        short = event.get("short_label") or event.get("label") or event.get("category") or "Event"
+        # Merge labels from the same day into a single readable annotation.
+        labels = []
+        for event in same_day:
+            short = event.get("short_label") or event.get("label") or event.get("category") or "Event"
+            if short not in labels:
+                labels.append(short)
+        merged_label = " + ".join(labels)
+
+        # Only stagger against OTHER nearby dates.
+        nearby_count = sum(
+            1 for previous_date in plotted_dates
+            if abs((dt.strptime(previous_date, "%Y-%m-%d") - ed).days) <= 1
+        )
+        y = ymax - span * (0.05 + 0.08 * (nearby_count % 4))
+
         ax.text(
-            ed, y, short,
+            ed, y, merged_label,
             rotation=90,
             va="top",
             ha="right",
             fontsize=8,
             alpha=0.85,
         )
-        plotted_dates.add(key)
+        plotted_dates.append(event_date)
 
     ax.set_title(title)
     ax.set_ylabel(ylabel)
