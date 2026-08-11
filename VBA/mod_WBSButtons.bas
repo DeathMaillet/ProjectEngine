@@ -468,7 +468,8 @@ Private Function WBS_Onboarding_StructureIsCurrent( _
         If cell.Borders(xlEdgeBottom).LineStyle <> xlContinuous Then Exit Function
         If cell.Borders(xlEdgeBottom).Color <> RGB(0, 0, 0) Then Exit Function
         If cell.Borders(xlEdgeBottom).Weight <> xlThin Then Exit Function
-
+
+
     Next key
 
     WBS_Onboarding_StructureIsCurrent = True
@@ -1082,7 +1083,8 @@ Private Sub WBS_Onboarding_WriteQuickStart(ByVal ws As Worksheet)
     Dim textChanged As Boolean
 
     Set noteArea = ws.Range("O1:R2")
-    noteText = WBS_Onboarding_QuickStartText()
+    noteText = WBS_Onboarding_QuickStartText()
+
     requiredLabel = WBS_Onboarding_RequiredLabel()
 
     If Not CBool(noteArea.MergeCells) Or _
