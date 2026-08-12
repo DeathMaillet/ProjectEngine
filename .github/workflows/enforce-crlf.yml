@@ -1,0 +1,22 @@
+name: Force CRLF for VBA files
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  enforce-crlf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enforce CRLF for VBA files
+        uses: DecimalTurn/Enforce-CRLF@3862e67f48e6116a3af78dd0c384cf84d964d018 # v1.3.1
+        with:
+          extensions: .bas, .frm, .cls
+          do-checkout: true
+          do-push: true
