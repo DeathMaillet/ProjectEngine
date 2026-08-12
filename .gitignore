@@ -12,7 +12,3 @@ Desktop.ini
 
 # VBA temp exports
 *.log
-
-# Local maintenance scripts
-Check-VBA-LineEndings.ps1
-Convert-VBA-To-CRLF.ps1
