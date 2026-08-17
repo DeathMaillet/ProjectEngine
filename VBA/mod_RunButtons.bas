@@ -183,6 +183,7 @@ Public Sub Run_Gantt_Update()
     workflowStarted = EnsurePlanningWorkflowStarted("Run_Gantt_Update")
     RunButtonsTrace_Checkpoint "Workflow stack", "Workflow started Run_Gantt_Update=" & CStr(workflowStarted)
     Set wsCaller = ActiveSheet
+    GanttLocal_PrimeNormalState
 
     'User-facing full update from the big Gantt Update button.
     '
@@ -217,9 +218,11 @@ Public Sub Run_Gantt_Update()
         GoTo CleanExit
     End If
 
-    RunButtonsTrace_Checkpoint "Gantt", "Refresh_Gantt start Run_Gantt_Update"
-    Refresh_Gantt
-    RunButtonsTrace_Checkpoint "Gantt", "Refresh_Gantt returned Run_Gantt_Update"
+    RunButtonsTrace_Checkpoint "Gantt", "Ensure RENDER_AND_SHOW start Run_Gantt_Update"
+    If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_RENDER_AND_SHOW, "Run_Gantt_Update") Then
+        Err.Raise 5, "Run_Gantt_Update", "Gantt renderer did not reach READY state after Update Gantt."
+    End If
+    RunButtonsTrace_Checkpoint "Gantt", "Ensure RENDER_AND_SHOW returned Run_Gantt_Update"
 
 CleanExit:
     RunButtonsTrace_Checkpoint "Workflow stack", "CleanExit Run_Gantt_Update"
@@ -229,9 +232,6 @@ CleanExit:
 
 SafeExit:
     RunButtonsTrace_Checkpoint "RunButtons", "SafeExit Run_Gantt_Update Err=" & CStr(Err.Number)
-    On Error Resume Next
-    If Not wsCaller Is Nothing Then wsCaller.Activate
-    On Error GoTo 0
 
     RunButtons_ShowConsoleError "Run_Gantt_Update"
     Resume CleanExit
@@ -332,9 +332,27 @@ Public Sub Run_Full_Update()
     End If
     If IsMacroAbortRequested() Then GoTo CleanExit
 
-    RunButtonsTrace_Checkpoint "Gantt", "Refresh_Gantt start Run_Full_Update"
-    Refresh_Gantt False, False
-    RunButtonsTrace_Checkpoint "Gantt", "Refresh_Gantt returned Run_Full_Update"
+    If Not wsCaller Is Nothing Then
+        If UCase$(CStr(wsCaller.Name)) = "GANTT" Then
+            RunButtonsTrace_Checkpoint "Gantt", "Ensure RENDER_AND_SHOW start Run_Full_Update"
+            If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_RENDER_AND_SHOW, "Run_Full_Update") Then
+                Err.Raise 5, "Run_Full_Update", "Gantt renderer did not reach READY state after Full Update on GANTT."
+            End If
+            RunButtonsTrace_Checkpoint "Gantt", "Ensure RENDER_AND_SHOW returned Run_Full_Update"
+        Else
+            RunButtonsTrace_Checkpoint "Gantt", "Ensure NO_RENDER start Run_Full_Update"
+            If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_NO_RENDER, "Run_Full_UpdateDeferredNonGantt") Then
+                Err.Raise 5, "Run_Full_Update", "Gantt NO_RENDER invalidation failed."
+            End If
+            RunButtonsTrace_Checkpoint "Gantt", "Ensure NO_RENDER returned Run_Full_Update"
+        End If
+    Else
+        RunButtonsTrace_Checkpoint "Gantt", "Ensure RENDER_OFFSCREEN start Run_Full_Update"
+        If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_RENDER_OFFSCREEN, "Run_Full_UpdateNoCaller") Then
+            Err.Raise 5, "Run_Full_Update", "Gantt renderer did not reach READY state after Full Update."
+        End If
+        RunButtonsTrace_Checkpoint "Gantt", "Ensure RENDER_OFFSCREEN returned Run_Full_Update"
+    End If
 
     If IsMacroAbortRequested() Then GoTo CleanExit
     RunButtonsTrace_Checkpoint "SCurve", "Run_SCurve_Engine start Run_Full_Update"

@@ -99,6 +99,20 @@ End Function
 ' FR: Indique si le mode SCENARIO est actuellement actif.
 ' EN: Returns whether SCENARIO mode is currently active.
 '------------------------------------------------------------------------------
+'------------------------------------------------------------------------------
+' FR: Indique si une projection de simulation runtime doit etre abandonnee.
+' EN: Returns whether a runtime simulation projection must be abandoned.
+'------------------------------------------------------------------------------
+Public Function GanttLive_HasActiveSimulationRuntimeState() As Boolean
+
+    GanttLive_HasActiveSimulationRuntimeState = _
+        (Trim$(GanttLive_GetPendingRenderMode()) <> "") Or _
+        (Trim$(GanttLive_GetActiveSimulationMode()) <> "") Or _
+        GanttTestAnalyticsSnapshot_IsCurrent() Or _
+        GetGanttPreserveTestInputs()
+
+End Function
+
 Public Function GanttLive_IsScenarioActive() As Boolean
     GanttLive_IsScenarioActive = (UCase$(Trim$(gActiveSimulationMode)) = "SCENARIO")
 End Function

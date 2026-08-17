@@ -467,7 +467,8 @@ End Sub
 Public Function CalcBridge_PreCore_CheckLOEAsPredecessor( _
     ByVal tblCalc As ListObject, _
     ByVal mapCalc As Object, _
-    Optional ByVal consoleMessages As Collection) As Boolean
+    Optional ByVal consoleMessages As Collection, _
+    Optional ByVal sharedLinksBySuccId As Object = Nothing) As Boolean
 
     Dim arrCalc As Variant
     Dim rowById As Object
@@ -515,7 +516,11 @@ Public Function CalcBridge_PreCore_CheckLOEAsPredecessor( _
 
     If loeIds.Count = 0 Then Exit Function
 
-    Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded(tblCalc)
+    If sharedLinksBySuccId Is Nothing Then
+        Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded(tblCalc)
+    Else
+        Set linksBySuccId = sharedLinksBySuccId
+    End If
     If linksBySuccId Is Nothing Then Exit Function
 
     For Each succId In linksBySuccId.Keys

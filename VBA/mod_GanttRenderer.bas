@@ -106,23 +106,20 @@ Public Sub DrawGanttShapes( _
     ByVal totalDays As Long, _
     ByVal baseById As Object, _
     ByVal testById As Object, _
-    ByVal isTestMode As Boolean)
+    ByVal isTestMode As Boolean, _
+    Optional ByVal affectedIds As Variant, _
+    Optional ByVal affectedRows As Variant)
 
     Dim perfScope As clsPerfScope
-
     Dim r As Long
     Dim rowCount As Long
-    Dim renderableRowCount As Long
     Dim ganttRow As Long
-
     Dim wbs As String
     Dim idVal As String
-
     Dim rawStartVal As Variant
     Dim rawFinishVal As Variant
     Dim renderStartVal As Variant
     Dim renderFinishVal As Variant
-
     Dim rawDurationDays As Long
     Dim progressVal As Double
     Dim isCritical As Boolean
@@ -131,86 +128,289 @@ Public Sub DrawGanttShapes( _
     Dim isLoE As Boolean
     Dim isMilestone As Boolean
     Dim parentCompleteMap As Object
+    Dim useFilter As Boolean
+    Dim useRows As Boolean
+    Dim filteredRows As Long
+    Dim rowKeys As Variant
+    Dim loopIndex As Long
 
     Set perfScope = Profiler_BeginScope("DrawGanttShapes", "Shape Render")
 
     rowCount = UBound(dataArr, 1)
-    Set parentCompleteMap = GanttHierarchy_BuildLeafCompletionByAncestor(dataArr, mapWBS)
+    useFilter = IsObject(affectedIds)
+    useRows = IsObject(affectedRows)
+    Set parentCompleteMap = GanttHierarchy_BuildLeafCompletionByAncestorForRows(dataArr, mapWBS, affectedRows)
 
-    For r = 1 To rowCount
-        ganttRow = FIRST_TASK_ROW + r - 1
+    If useRows Then
+        rowKeys = affectedRows.keys
+        Profiler_RecordOperation "GanttProjectedRowsFromChangeSet", affectedRows.Count, 0#
+        For loopIndex = LBound(rowKeys) To UBound(rowKeys)
+            r = CLng(rowKeys(loopIndex))
+            If r >= 1 And r <= rowCount Then
+                DrawGanttShapeRow ws, dataArr, mapWBS, hasChildren, projectStart, totalDays, _
+                    baseById, testById, isTestMode, parentCompleteMap, affectedIds, r, filteredRows
+            End If
+        Next loopIndex
+    Else
+        For r = 1 To rowCount
+            DrawGanttShapeRow ws, dataArr, mapWBS, hasChildren, projectStart, totalDays, _
+                baseById, testById, isTestMode, parentCompleteMap, affectedIds, r, filteredRows
+        Next r
+    End If
+
+    If useFilter Then Profiler_RecordOperation "GanttLocalTaskRowsRendered", filteredRows, 0#
+
+End Sub
+
+Private Sub DrawGanttShapeRow( _
+    ByVal ws As Worksheet, _
+    ByRef dataArr As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal hasChildren As Object, _
+    ByVal projectStart As Variant, _
+    ByVal totalDays As Long, _
+    ByVal baseById As Object, _
+    ByVal testById As Object, _
+    ByVal isTestMode As Boolean, _
+    ByVal parentCompleteMap As Object, _
+    ByVal affectedIds As Variant, _
+    ByVal r As Long, _
+    ByRef filteredRows As Long)
+
+    Dim ganttRow As Long
+    Dim wbs As String
+    Dim idVal As String
+    Dim rawStartVal As Variant
+    Dim rawFinishVal As Variant
+    Dim renderStartVal As Variant
+    Dim renderFinishVal As Variant
+    Dim rawDurationDays As Long
+    Dim progressVal As Double
+    Dim isCritical As Boolean
+    Dim hasDelta As Boolean
+    Dim isParent As Boolean
+    Dim isLoE As Boolean
+    Dim isMilestone As Boolean
+
+    ganttRow = FIRST_TASK_ROW + r - 1
+    wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+    idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+
+    If IsObject(affectedIds) Then
+        If Not affectedIds.Exists(idVal) Then Exit Sub
+        filteredRows = filteredRows + 1
+    End If
+
+    rawStartVal = GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode)
+    rawFinishVal = GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode)
+
+    renderStartVal = GetRenderStartForCurrentScale(rawStartVal)
+    renderFinishVal = GetRenderFinishForCurrentScale(rawFinishVal)
+
+    isParent = hasChildren.Exists(wbs)
+    isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
+    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r)
+
+    If Not ShouldRenderTaskInCurrentView(isParent, renderStartVal, renderFinishVal) Then Exit Sub
+    If Not HasValue(rawStartVal) Or Not HasValue(rawFinishVal) Then Exit Sub
+    If Not HasValue(renderStartVal) Or Not HasValue(renderFinishVal) Then Exit Sub
+
+    rawDurationDays = CLng(CDbl(rawFinishVal) - CDbl(rawStartVal) + 1)
+
+    If isLoE Then
+        progressVal = GetLoEProgressFromToday(rawStartVal, rawFinishVal)
+    ElseIf HasValue(GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode)) Then
+        progressVal = CDbl(GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode))
+    Else
+        progressVal = 0#
+    End If
+
+    isCritical = ShouldHighlightGanttAnalyticsPath(dataArr, mapWBS, r, idVal, testById, isTestMode)
+
+    If isTestMode Then hasDelta = GanttLive_HasRenderableTestDelta(idVal, baseById, testById)
+
+    If isParent Then
+        DrawSummaryBar ws, ganttRow, projectStart, rawStartVal, rawFinishVal, isCritical, totalDays, _
+            "SUM_" & CStr(r), Trim$(CStr(dataArr(r, mapWBS("Task Name")))), hasDelta, _
+            ParentIsCompleteFromMap(wbs, parentCompleteMap)
+    ElseIf isMilestone Then
+        DrawMilestone ws, ganttRow, projectStart, rawStartVal, progressVal, isCritical, totalDays, "MS_" & CStr(r), hasDelta
+    ElseIf ShouldDrawCompactTaskMarker(ws, ganttRow, projectStart, rawStartVal, rawFinishVal, rawDurationDays, isLoE) Then
+        DrawSingleWeekTask ws, ganttRow, projectStart, rawStartVal, progressVal, isCritical, totalDays, _
+            "TASK_" & CStr(r), hasDelta, rawFinishVal
+    Else
+        DrawTaskBar ws, ganttRow, projectStart, rawStartVal, rawFinishVal, progressVal, isCritical, totalDays, _
+            "TASK_" & CStr(r), hasDelta, rawStartVal, rawFinishVal, isLoE
+    End If
+
+End Sub
+
+Public Function GanttRenderer_ApplyAnalyticsStyleOnlyRecords( _
+    ByVal ws As Worksheet, _
+    ByRef dataArr As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal hasChildren As Object, _
+    ByVal baseById As Object, _
+    ByVal testById As Object, _
+    ByVal isTestMode As Boolean, _
+    ByVal changedRows As Object) As Boolean
+
+    Dim perfScope As clsPerfScope
+    Dim parentCompleteMap As Object
+    Dim rowKeys As Variant
+    Dim key As Variant
+    Dim r As Long
+    Dim wbs As String
+    Dim idVal As String
+    Dim isParent As Boolean
+    Dim isMilestone As Boolean
+    Dim isCritical As Boolean
+    Dim progressVal As Double
+    Dim rawStartVal As Variant
+    Dim rawFinishVal As Variant
+    Dim fillColor As Long
+    Dim lineColor As Long
+    Dim shapeName As String
+    Dim logicalTargets As Long
+    Dim stylesExpected As Long
+    Dim stylesApplied As Long
+    Dim stylesUnavailable As Long
+    Dim noPhysicalTargets As Long
+
+    Set perfScope = Profiler_BeginScope("GanttRenderer_ApplyAnalyticsStyleOnlyRecords", "Gantt Style")
+    If ws Is Nothing Then Exit Function
+    If changedRows Is Nothing Then Exit Function
+
+    rowKeys = changedRows.keys
+
+    ' Validate the whole style-only batch before the first physical write. A
+    ' missing canonical record for an existing Shape must fall back atomically.
+    For Each key In rowKeys
+        r = CLng(key)
+        If r < 1 Or r > UBound(dataArr, 1) Then GoTo NextPreflightRow
+
+        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+        isParent = hasChildren.Exists(wbs)
+        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
+
+        If isParent Then
+            shapeName = "SUM_" & CStr(r) & "_H"
+            logicalTargets = logicalTargets + 1
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                stylesExpected = stylesExpected + 1
+            ElseIf GanttShapeRegistry_CanApplyStyleOnlyRecord(ws, shapeName) Then
+                noPhysicalTargets = noPhysicalTargets + 1
+            Else
+                stylesUnavailable = stylesUnavailable + 1
+            End If
+
+            shapeName = "SUM_" & CStr(r) & "_L"
+            logicalTargets = logicalTargets + 1
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                stylesExpected = stylesExpected + 1
+            ElseIf GanttShapeRegistry_CanApplyStyleOnlyRecord(ws, shapeName) Then
+                noPhysicalTargets = noPhysicalTargets + 1
+            Else
+                stylesUnavailable = stylesUnavailable + 1
+            End If
+
+            shapeName = "SUM_" & CStr(r) & "_R"
+            logicalTargets = logicalTargets + 1
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                stylesExpected = stylesExpected + 1
+            ElseIf GanttShapeRegistry_CanApplyStyleOnlyRecord(ws, shapeName) Then
+                noPhysicalTargets = noPhysicalTargets + 1
+            Else
+                stylesUnavailable = stylesUnavailable + 1
+            End If
+        ElseIf isMilestone Then
+            shapeName = "MS_" & CStr(r)
+            logicalTargets = logicalTargets + 1
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                stylesExpected = stylesExpected + 1
+            ElseIf GanttShapeRegistry_CanApplyStyleOnlyRecord(ws, shapeName) Then
+                noPhysicalTargets = noPhysicalTargets + 1
+            Else
+                stylesUnavailable = stylesUnavailable + 1
+            End If
+        Else
+            shapeName = "TASK_" & CStr(r)
+            logicalTargets = logicalTargets + 1
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                stylesExpected = stylesExpected + 1
+            ElseIf GanttShapeRegistry_CanApplyStyleOnlyRecord(ws, shapeName) Then
+                noPhysicalTargets = noPhysicalTargets + 1
+            Else
+                stylesUnavailable = stylesUnavailable + 1
+            End If
+        End If
+
+NextPreflightRow:
+    Next key
+
+    Profiler_RecordOperation "GanttStyleOnlyLogicalTargets", logicalTargets, 0#
+    Profiler_RecordOperation "GanttStyleOnlyRecordsExpected", stylesExpected, 0#
+    Profiler_RecordOperation "GanttStyleOnlyNoPhysicalTarget", noPhysicalTargets, 0#
+    Profiler_RecordOperation "GanttStyleOnlyRecordsUnavailable", stylesUnavailable, 0#
+    If stylesUnavailable > 0 Then Exit Function
+
+    Set parentCompleteMap = GanttHierarchy_BuildLeafCompletionByAncestorForRows(dataArr, mapWBS, changedRows)
+
+    For Each key In rowKeys
+        r = CLng(key)
+        If r < 1 Or r > UBound(dataArr, 1) Then GoTo NextRow
 
         wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
         idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+        isParent = hasChildren.Exists(wbs)
+        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
+        isCritical = ShouldHighlightGanttAnalyticsPath(dataArr, mapWBS, r, idVal, testById, isTestMode)
 
         rawStartVal = GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode)
         rawFinishVal = GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode)
 
-        renderStartVal = GetRenderStartForCurrentScale(rawStartVal)
-        renderFinishVal = GetRenderFinishForCurrentScale(rawFinishVal)
-
-        isParent = hasChildren.Exists(wbs)
-        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
-        isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r)
-
-        If Not ShouldRenderTaskInCurrentView(isParent, renderStartVal, renderFinishVal) Then GoTo NextShape
-        If Not HasValue(rawStartVal) Or Not HasValue(rawFinishVal) Then GoTo NextShape
-        If Not HasValue(renderStartVal) Or Not HasValue(renderFinishVal) Then GoTo NextShape
-
-        rawDurationDays = CLng(CDbl(rawFinishVal) - CDbl(rawStartVal) + 1)
-
-        progressVal = 0
-
-        If isLoE Then
-
-            'LOE Primavera-style progress:
-            'The visual progress must be derived from TODAY and LOE calculated dates,
-            'not from the manual % Progress stored in WBS/CALC.
-            progressVal = GetLoEProgressFromToday(rawStartVal, rawFinishVal)
-
-        Else
-
-            If HasValue(GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode)) Then
-                progressVal = CDbl(GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode))
-            End If
-
-        End If
-
-        isCritical = ShouldHighlightGanttAnalyticsPath(dataArr, mapWBS, r, idVal, testById, isTestMode)
-
-        hasDelta = False
-        If isTestMode Then
-            hasDelta = GanttLive_HasRenderableTestDelta(idVal, baseById, testById)
+        progressVal = 0#
+        If HasValue(GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode)) Then
+            progressVal = CDbl(GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode))
         End If
 
         If isParent Then
-
-            DrawSummaryBar ws, ganttRow, projectStart, rawStartVal, rawFinishVal, isCritical, totalDays, _
-                "SUM_" & CStr(r), Trim$(CStr(dataArr(r, mapWBS("Task Name")))), hasDelta, _
-                ParentIsCompleteFromMap(wbs, parentCompleteMap)
-
+            lineColor = GetSummaryLineColor(isCritical, ParentIsCompleteFromMap(wbs, parentCompleteMap))
+            shapeName = "SUM_" & CStr(r) & "_H"
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                If GanttShapeRegistry_ApplyStyleOnlyRecord(ws, shapeName, Empty, lineColor) Then stylesApplied = stylesApplied + 1
+            End If
+            shapeName = "SUM_" & CStr(r) & "_L"
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                If GanttShapeRegistry_ApplyStyleOnlyRecord(ws, shapeName, Empty, lineColor) Then stylesApplied = stylesApplied + 1
+            End If
+            shapeName = "SUM_" & CStr(r) & "_R"
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                If GanttShapeRegistry_ApplyStyleOnlyRecord(ws, shapeName, Empty, lineColor) Then stylesApplied = stylesApplied + 1
+            End If
         ElseIf isMilestone Then
-
-            DrawMilestone ws, ganttRow, projectStart, rawStartVal, progressVal, isCritical, totalDays, "MS_" & CStr(r), hasDelta
-
-        ElseIf ShouldDrawCompactTaskMarker(ws, ganttRow, projectStart, rawStartVal, rawFinishVal, rawDurationDays, isLoE) Then
-
-            DrawSingleWeekTask ws, ganttRow, projectStart, rawStartVal, progressVal, isCritical, totalDays, _
-                "TASK_" & CStr(r), hasDelta, rawFinishVal
-
+            fillColor = GetTaskBaseColor(isCritical)
+            If progressVal >= 1 Then fillColor = COLOR_PROGRESS_GREEN
+            shapeName = "MS_" & CStr(r)
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                If GanttShapeRegistry_ApplyStyleOnlyRecord(ws, shapeName, fillColor, Empty) Then stylesApplied = stylesApplied + 1
+            End If
         Else
-
-            DrawTaskBar ws, ganttRow, projectStart, rawStartVal, rawFinishVal, progressVal, isCritical, totalDays, _
-                "TASK_" & CStr(r), hasDelta, rawStartVal, rawFinishVal, isLoE
-
+            fillColor = GetTaskBaseColor(isCritical)
+            If progressVal >= 1 Then fillColor = COLOR_PROGRESS_GREEN
+            shapeName = "TASK_" & CStr(r)
+            If GanttShapeRegistry_HasCanonicalRecord(shapeName) Then
+                If GanttShapeRegistry_ApplyStyleOnlyRecord(ws, shapeName, fillColor, Empty) Then stylesApplied = stylesApplied + 1
+            End If
         End If
 
-NextShape:
-    Next r
+NextRow:
+    Next key
 
-End Sub
+    Profiler_RecordOperation "GanttStyleOnlyRecordsApplied", stylesApplied, 0#
+    GanttRenderer_ApplyAnalyticsStyleOnlyRecords = (stylesApplied = stylesExpected)
 
-'------------------------------------------------------------------------------
+End Function '------------------------------------------------------------------------------
 ' FR: Retourne une decision de rendu ou d'etat utilisee par le workflow GANTT.
 ' EN: Returns a rendering or state decision used by the GANTT workflow.
 '------------------------------------------------------------------------------
@@ -508,7 +708,7 @@ Public Function GetProgressFillColor( _
     progressFinish = CDbl(startVal) + coveredDays - 1
     todayVal = CDbl(Date)
 
-    ' Tolérance : on considère "à jour" si le progress couvre aujourd'hui - 1
+    ' TolÃ©rance : on considÃ¨re "Ã  jour" si le progress couvre aujourd'hui - 1
     If progressFinish >= todayVal - 1 Then
         GetProgressFillColor = COLOR_PROGRESS_GREEN
     Else
@@ -523,20 +723,66 @@ End Function
 '------------------------------------------------------------------------------
 Public Function GanttHierarchy_BuildLeafCompletionByAncestor(ByRef dataArr As Variant, ByVal mapWBS As Object) As Object
 
+    Set GanttHierarchy_BuildLeafCompletionByAncestor = _
+        GanttHierarchy_BuildLeafCompletionByAncestorForRows(dataArr, mapWBS, Empty)
+
+End Function
+
+Public Function GanttHierarchy_BuildLeafCompletionByAncestorForRows( _
+    ByRef dataArr As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal affectedRows As Variant) As Object
+
+    Dim perfScope As clsPerfScope
     Dim parentMap As Object
+    Dim targetParents As Object
+    Dim rowCount As Long
     Dim i As Long
     Dim wbsVal As String
+    Dim nextWbs As String
     Dim parentWbs As String
     Dim progressVal As Double
+    Dim isLeaf As Boolean
+    Dim useTargets As Boolean
+    Dim rowKeys As Variant
+    Dim key As Variant
 
+    Set perfScope = Profiler_BeginScope("GanttHierarchy_BuildLeafCompletionByAncestor", "Gantt Projection")
     Set parentMap = CreateObject("Scripting.Dictionary")
+    Set targetParents = CreateObject("Scripting.Dictionary")
+    rowCount = UBound(dataArr, 1)
+    useTargets = IsObject(affectedRows)
 
-    For i = 1 To UBound(dataArr, 1)
+    If useTargets Then
+        rowKeys = affectedRows.keys
+        For Each key In rowKeys
+            i = CLng(key)
+            If i >= 1 And i <= rowCount Then
+                wbsVal = NormalizeWBS(CStr(dataArr(i, mapWBS("WBS"))))
+                If wbsVal <> "" Then
+                    If HasValue(dataArr(i, mapWBS("% Progress"))) Then
+                        parentMap(wbsVal) = (CDbl(dataArr(i, mapWBS("% Progress"))) >= 1)
+                    Else
+                        parentMap(wbsVal) = False
+                    End If
+                    targetParents(wbsVal) = True
+                End If
+            End If
+        Next key
+        Profiler_RecordOperation "GanttHierarchyTargetParents", targetParents.Count, 0#
+        Profiler_RecordOperation "GanttHierarchyLeafCompletionRows", affectedRows.Count, 0#
+        Set GanttHierarchy_BuildLeafCompletionByAncestorForRows = parentMap
+        Exit Function
+    End If
 
+    For i = 1 To rowCount
         wbsVal = NormalizeWBS(CStr(dataArr(i, mapWBS("WBS"))))
         If wbsVal = "" Then GoTo NextI
 
-        If IsParentWBS(wbsVal, dataArr, mapWBS) Then GoTo NextI
+        nextWbs = vbNullString
+        If i < rowCount Then nextWbs = NormalizeWBS(CStr(dataArr(i + 1, mapWBS("WBS"))))
+        isLeaf = Not (nextWbs <> "" And Left$(nextWbs, Len(wbsVal) + 1) = wbsVal & ".")
+        If Not isLeaf Then GoTo NextI
 
         If HasValue(dataArr(i, mapWBS("% Progress"))) Then
             progressVal = CDbl(dataArr(i, mapWBS("% Progress")))
@@ -545,27 +791,19 @@ Public Function GanttHierarchy_BuildLeafCompletionByAncestor(ByRef dataArr As Va
         End If
 
         parentWbs = GetParentWBS(wbsVal)
-
         Do While parentWbs <> ""
-            If Not parentMap.Exists(parentWbs) Then
-                parentMap(parentWbs) = True
-            End If
-
-            If progressVal < 1 Then
-                parentMap(parentWbs) = False
-            End If
-
+            If Not parentMap.Exists(parentWbs) Then parentMap(parentWbs) = True
+            If progressVal < 1 Then parentMap(parentWbs) = False
             parentWbs = GetParentWBS(parentWbs)
         Loop
 
 NextI:
     Next i
 
-    Set GanttHierarchy_BuildLeafCompletionByAncestor = parentMap
+    Profiler_RecordOperation "GanttHierarchyLeafCompletionRows", rowCount, 0#
+    Set GanttHierarchy_BuildLeafCompletionByAncestorForRows = parentMap
 
-End Function
-
-'------------------------------------------------------------------------------
+End Function '------------------------------------------------------------------------------
 ' FR: Execute le helper Parent Is Complete From Map dans le workflow de rendu GANTT.
 ' EN: Runs the Parent Is Complete From Map helper in the GANTT rendering workflow.
 '------------------------------------------------------------------------------
@@ -744,8 +982,6 @@ Private Sub DrawSummaryBar( _
     Dim yTop As Double
     Dim yMid As Double
     Dim yBottom As Double
-    Dim shp As Shape
-
     Dim displayText As String
     Dim maxLen As Long
     Dim txtShape As Shape
@@ -770,35 +1006,13 @@ Private Sub DrawSummaryBar( _
 
     lineColor = GetSummaryLineColor(isCritical, isComplete)
 
-    Set shp = ws.Shapes.AddLine(x1, yMid, x2, yMid)
-    shp.Name = shapeKey & "_H"
-    ApplyGanttRenderLinePlacement shp
-    shp.Line.Weight = 2.25
-    If hasDelta Then
-        shp.Line.ForeColor.RGB = RGB(255, 192, 0)
-    Else
-        shp.Line.ForeColor.RGB = lineColor
-    End If
+    If hasDelta Then lineColor = RGB(255, 192, 0)
 
-    Set shp = ws.Shapes.AddLine(x1, yTop, x1, yBottom)
-    shp.Name = shapeKey & "_L"
-    ApplyGanttRenderLinePlacement shp
-    shp.Line.Weight = 2.25
-    If hasDelta Then
-        shp.Line.ForeColor.RGB = RGB(255, 192, 0)
-    Else
-        shp.Line.ForeColor.RGB = lineColor
-    End If
+    GanttRenderer_UpsertSummaryLine ws, shapeKey & "_H", x1, yMid, x2, yMid, lineColor
+    GanttRenderer_UpsertSummaryLine ws, shapeKey & "_L", x1, yTop, x1, yBottom, lineColor
+    GanttRenderer_UpsertSummaryLine ws, shapeKey & "_R", x2, yTop, x2, yBottom, lineColor
 
-    Set shp = ws.Shapes.AddLine(x2, yTop, x2, yBottom)
-    shp.Name = shapeKey & "_R"
-    ApplyGanttRenderLinePlacement shp
-    shp.Line.Weight = 2.25
-    If hasDelta Then
-        shp.Line.ForeColor.RGB = RGB(255, 192, 0)
-    Else
-        shp.Line.ForeColor.RGB = lineColor
-    End If
+    If GanttShapeRegistry_IsStyleOnlySession() Then Exit Sub
 
     maxLen = 28
 
@@ -810,13 +1024,36 @@ Private Sub DrawSummaryBar( _
     textLeft = x2 + 8
     textTop = GetGanttRowTop(ws, ganttRow)
 
-    Set txtShape = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, textLeft, textTop, 220, GetGanttRowHeight(ws, ganttRow))
-    txtShape.Name = shapeKey & "_TXT"
-    ApplyGanttRenderShapePlacement txtShape
+    GanttShapeRegistry_RegisterExpectedName shapeKey & "_TXT"
+
+    On Error Resume Next
+    Set txtShape = ws.Shapes(shapeKey & "_TXT")
+    On Error GoTo 0
+
+    If txtShape Is Nothing Then
+        Set txtShape = ws.Shapes.AddTextbox( _
+            msoTextOrientationHorizontal, textLeft, textTop, 220, GetGanttRowHeight(ws, ganttRow))
+        txtShape.Name = shapeKey & "_TXT"
+        ApplyGanttRenderShapePlacement txtShape
+        Profiler_RecordOperation "GanttDiffShapesCreated", 1, 0#
+    Else
+        Profiler_RecordOperation "GanttDiffShapesInspected", 1, 0#
+    End If
+
+    If Abs(txtShape.Left - textLeft) > 0.1 Or _
+       Abs(txtShape.Top - textTop) > 0.1 Or _
+       Abs(txtShape.Width - 220) > 0.1 Or _
+       Abs(txtShape.Height - GetGanttRowHeight(ws, ganttRow)) > 0.1 Then
+        txtShape.Left = textLeft
+        txtShape.Top = textTop
+        txtShape.Width = 220
+        txtShape.Height = GetGanttRowHeight(ws, ganttRow)
+        Profiler_RecordOperation "GanttDiffGeometriesUpdated", 1, 0#
+    End If
 
     With txtShape
-        .Line.Visible = msoFalse
-        .Fill.Visible = msoFalse
+        If .Line.Visible <> msoFalse Then .Line.Visible = msoFalse
+        If .Fill.Visible <> msoFalse Then .Fill.Visible = msoFalse
         .TextFrame2.VerticalAnchor = msoAnchorMiddle
         .TextFrame2.MarginLeft = 0
         .TextFrame2.MarginRight = 0
@@ -825,10 +1062,49 @@ Private Sub DrawSummaryBar( _
     End With
 
     With txtShape.TextFrame2.TextRange
-        .Text = displayText
+        If .Text <> displayText Then .Text = displayText
         .Font.Size = 10.5
         .Font.Fill.ForeColor.RGB = RGB(80, 80, 80)
     End With
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Cree ou met a jour un segment de summary avec un nom stable.
+' EN: Creates or updates a summary segment using a stable name.
+'------------------------------------------------------------------------------
+Private Sub GanttRenderer_UpsertSummaryLine( _
+    ByVal ws As Worksheet, _
+    ByVal shapeName As String, _
+    ByVal x1 As Double, _
+    ByVal y1 As Double, _
+    ByVal x2 As Double, _
+    ByVal y2 As Double, _
+    ByVal lineColor As Long)
+
+    Dim rec As Object
+
+    Set rec = CreateObject("Scripting.Dictionary")
+    rec("Name") = shapeName
+    rec("Family") = "SUM"
+    rec("Subtype") = "LINE"
+    rec("IsLine") = True
+    rec("X1") = x1
+    rec("Y1") = y1
+    rec("X2") = x2
+    rec("Y2") = y2
+    rec("Left") = WorksheetFunction.Min(x1, x2)
+    rec("Top") = WorksheetFunction.Min(y1, y2)
+    rec("Width") = Abs(x2 - x1)
+    rec("Height") = Abs(y2 - y1)
+    rec("Visible") = True
+    rec("LineColor") = lineColor
+    rec("LineWeight") = 2.25
+    rec("DashStyle") = msoLineSolid
+    rec("ZFront") = False
+
+    GanttShapeRegistry_RegisterExpectedName shapeName
+    GanttShapeRegistry_UpsertShapeFromRecord ws, rec
 
 End Sub
 
@@ -863,4 +1139,3 @@ Public Function GetLoEProgressFromToday( _
     End If
 
 End Function
-

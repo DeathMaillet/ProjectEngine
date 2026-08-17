@@ -55,6 +55,7 @@ Public Sub GanttTestService_RunTestEngine( _
     Dim mapCalcDriving As Object
     Dim wbsToId As Object
     Dim calcById As Object
+    Dim ganttRowByWbs As Object
 
     Dim dataWBS As Variant
     Dim outArr() As Variant
@@ -110,6 +111,26 @@ Public Sub GanttTestService_RunTestEngine( _
     Set consoleMessages = New Collection
 
     Set wsGantt = ThisWorkbook.Worksheets(GANTT_SHEET)
+
+    If Not GanttLive_HasAnyGanttTestInputFast(wsGantt) Then
+        If GanttLive_HasActiveSimulationRuntimeState() Then GanttSimulation_ResetToNormal True
+        If Not CommitGanttUpdate(GANTT_DATA_SOURCE_NORMAL, GANTT_UPDATE_SCOPE_PARTIAL, GANTT_RENDER_INTENT_SHOW, "Run_Gantt_Test_EngineEmpty") Then
+            Err.Raise 5, "Run_Gantt_Test_Engine", "Gantt TEST empty convergence did not reach READY state."
+        End If
+        ganttRebuilt = True
+        testSucceeded = True
+
+        GanttLive_AddBiConsoleMessage consoleMessages, "INFO", _
+            "Aucune saisie TEST dÃ©tectÃ©e. L'affichage normal est dÃ©jÃ  restaurÃ©.", _
+            "No TEST input detected. The normal display is already restored."
+
+        If silentMode Then
+            If recordSilentMessages Then CalcBridge_RecordPlanningMessages consoleMessages, "Run_Gantt_Test_Engine"
+        Else
+            CalcBridge_ShowPlanningConsole consoleMessages
+        End If
+        GoTo CleanExit
+    End If
     Set wsWBS = ThisWorkbook.Worksheets(WBS_SHEET)
     Set wsCalc = ThisWorkbook.Worksheets(CALC_SHEET)
 
@@ -127,6 +148,7 @@ Public Sub GanttTestService_RunTestEngine( _
     Set mapCalcDriving = CanonicalIdentity_GetDrivingLogicByIdMap()
     Set wbsToId = CanonicalIdentity_GetWbsToIdMap()
     Set calcById = BuildCalcByIdMap_Live(tblCalc, mapCalc)
+    Set ganttRowByWbs = BuildGanttRowByWbsMap(wsGantt)
 
     ValidateGanttTestSourceColumns mapWBS, mapCalc
     ValidateCalcGanttTestColumns tblTest
@@ -178,7 +200,8 @@ Public Sub GanttTestService_RunTestEngine( _
         inputProgress = Empty
         anyTestValue = False
 
-        ganttRow = FindGanttRowByWBS(wsGantt, wbsVal)
+        ganttRow = 0
+        If ganttRowByWbs.Exists(wbsVal) Then ganttRow = CLng(ganttRowByWbs(wbsVal))
 
         If ganttRow > 0 Then
             testStart = GetCellValue(wsGantt.Cells(ganttRow, COL_TEST_START).value)
@@ -243,6 +266,26 @@ Public Sub GanttTestService_RunTestEngine( _
 
     hasAnyTestInput = GanttLive_HasAnyTestInput(tblTest)
 
+    If Not hasAnyTestInput Then
+        GanttSimulation_ResetToNormal True
+        If Not CommitGanttUpdate(GANTT_DATA_SOURCE_NORMAL, GANTT_UPDATE_SCOPE_PARTIAL, GANTT_RENDER_INTENT_SHOW, "Run_Gantt_Test_EngineNoInput") Then
+            Err.Raise 5, "Run_Gantt_Test_Engine", "Gantt TEST no-input convergence did not reach READY state."
+        End If
+        ganttRebuilt = True
+        testSucceeded = True
+
+        GanttLive_AddBiConsoleMessage consoleMessages, "INFO", _
+            "Aucune saisie TEST dÃ©tectÃ©e. L'affichage normal est dÃ©jÃ  restaurÃ©.", _
+            "No TEST input detected. The normal display is already restored."
+
+        If silentMode Then
+            If recordSilentMessages Then CalcBridge_RecordPlanningMessages consoleMessages, "Run_Gantt_Test_Engine"
+        Else
+            CalcBridge_ShowPlanningConsole consoleMessages
+        End If
+        GoTo CleanExit
+    End If
+
     If Not Run_Gantt_Test_Backend(tblTest, consoleMessages) Then
         GanttLive_AbortTestEngine wsGantt
         If silentMode Then
@@ -268,20 +311,20 @@ Public Sub GanttTestService_RunTestEngine( _
     If Not hasAnyTestInput Then
 
         GanttLive_AddBiConsoleMessage consoleMessages, "INFO", _
-            "Aucune saisie TEST détectée. L’affichage simulation a été réinitialisé.", _
+            "Aucune saisie TEST dÃ©tectÃ©e. Lâ€™affichage simulation a Ã©tÃ© rÃ©initialisÃ©.", _
             "No TEST input detected. Simulation display has been reset."
 
     ElseIf hasRenderableDelta Then
 
         GanttLive_AddBiConsoleMessage consoleMessages, "INFO", _
-            "Simulation exécutée.", _
+            "Simulation exÃ©cutÃ©e.", _
             "Simulation executed."
 
     Else
 
         GanttLive_AddBiConsoleMessage consoleMessages, "INFO", _
-            "Simulation exécutée, mais aucun changement visible n'a été produit." & vbCrLf & _
-            "-> cause probable : priorité locale (Actual/Forecast) et/ou contrainte réseau inchangée.", _
+            "Simulation exÃ©cutÃ©e, mais aucun changement visible n'a Ã©tÃ© produit." & vbCrLf & _
+            "-> cause probable : prioritÃ© locale (Actual/Forecast) et/ou contrainte rÃ©seau inchangÃ©e.", _
             "Simulation executed, but no visible change was produced." & vbCrLf & _
             "-> probable cause: local priority (Actual/Forecast) and/or unchanged network constraint."
 
@@ -357,6 +400,7 @@ Private Function Run_Gantt_Test_Backend( _
     Dim dataCore As Variant
     Dim mapCore As Object
     Dim linksBySuccId As Object
+    Dim executionNetwork As clsCompiledExecutionNetwork
 
     Dim outStart() As Variant
     Dim outFinish() As Variant
@@ -426,8 +470,9 @@ Private Function Run_Gantt_Test_Backend( _
 
     Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded( _
         ThisWorkbook.Worksheets(CALC_SHEET).ListObjects(CALC_TABLE))
+    Set executionNetwork = CompileExecutionNetwork(dataCore, mapCore, linksBySuccId)
 
-    Run_Calc_Core dataCore, mapCore, linksBySuccId, , dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics
+    Run_Calc_Core dataCore, mapCore, linksBySuccId, , dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics, executionNetwork
 
     For r = 1 To rowCount
 
@@ -488,7 +533,7 @@ NextRow:
         Exit Function
     End If
 
-    Set analyticsById = CalcBridge_BuildAnalyticsSnapshotById(dataCore, mapCore, linksBySuccId)
+    Set analyticsById = CalcBridge_BuildAnalyticsSnapshotById(dataCore, mapCore, linksBySuccId, executionNetwork)
     Set resultById = GanttSimulation_BuildResultByIdMap()
     GanttTestAnalyticsSnapshot_Set resultById, analyticsById
 
@@ -509,12 +554,11 @@ End Function
 
 Private Sub GanttLive_ApplyTestRender(ByVal wsGantt As Worksheet)
 
-    Dim fastRenderApplied As Boolean
-
     SetGanttPreserveTestInputs True
     GanttLive_RequestTestRender
-    fastRenderApplied = Gantt_TryApplyTestDayPredictiveRegistry()
-    If Not fastRenderApplied Then Refresh_Gantt
+    If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_LOCAL_UPDATE, "GanttLive_ApplyTestRender") Then
+        Err.Raise 5, "GanttLive_ApplyTestRender", "Gantt TEST render did not reach READY state."
+    End If
     GanttLive_SetActiveSimulationMode "TEST"
     SetGanttPreserveTestInputs False
 
@@ -567,7 +611,7 @@ Private Sub BuildTestInputValues_FromWBSSource( _
 
     '----------------------------------------
     ' START candidate
-    ' Priorité stricte : Test > Actual > Forecast > Baseline
+    ' PrioritÃ© stricte : Test > Actual > Forecast > Baseline
     '----------------------------------------
     If HasValue(testStart) Then
         inputStart = testStart
@@ -581,7 +625,7 @@ Private Sub BuildTestInputValues_FromWBSSource( _
 
     '----------------------------------------
     ' FINISH candidate
-    ' Priorité stricte : Test > Actual > Forecast
+    ' PrioritÃ© stricte : Test > Actual > Forecast
     '----------------------------------------
     If HasValue(testFinish) Then
         inputFinish = testFinish
@@ -593,7 +637,7 @@ Private Sub BuildTestInputValues_FromWBSSource( _
 
     '----------------------------------------
     ' Cas explicite Test Start + Test Finish :
-    ' on dérive la durée du test saisi
+    ' on dÃ©rive la durÃ©e du test saisi
     '----------------------------------------
     If HasValue(testStart) And HasValue(testFinish) Then
         inputDuration = CDbl(testFinish) - CDbl(testStart) + 1
@@ -954,7 +998,7 @@ Private Function GanttLive_FindActualTasksImpactedByTestChanges( _
     For Each startId In changedTestIds.Keys
 
         ' IMPORTANT :
-        ' la tâche modifiée elle-même doit être incluse si elle a de l’Actual
+        ' la tÃ¢che modifiÃ©e elle-mÃªme doit Ãªtre incluse si elle a de lâ€™Actual
         If hasActualById.Exists(CStr(startId)) Then
             If hasActualById(CStr(startId)) Then
                 impactedActualIds(CStr(startId)) = True
@@ -1122,3 +1166,5 @@ NextRow:
     Next r
 
 End Function
+
+

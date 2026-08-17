@@ -163,6 +163,9 @@ Public Function AddWorkingDays( _
     Dim calType As String
     Dim remaining As Long
     Dim d As Date
+    Dim perfScope As clsPerfScope
+
+    Set perfScope = Profiler_BeginScope("AddWorkingDays", "Calendar")
 
     If Not HasValue(startDate) Then
         AddWorkingDays = Empty
@@ -211,6 +214,9 @@ Public Function SubtractWorkingDays( _
     Dim calType As String
     Dim remaining As Long
     Dim d As Date
+    Dim perfScope As clsPerfScope
+
+    Set perfScope = Profiler_BeginScope("SubtractWorkingDays", "Calendar")
 
     If Not HasValue(finishDate) Then
         SubtractWorkingDays = Empty
@@ -259,6 +265,9 @@ Public Function DateDiffWorkingDays( _
     Dim calType As String
     Dim startSerial As Long
     Dim finishSerial As Long
+    Dim perfScope As clsPerfScope
+
+    Set perfScope = Profiler_BeginScope("DateDiffWorkingDays", "Calendar")
 
     If Not HasValue(startDate) Then
         DateDiffWorkingDays = Empty
@@ -307,6 +316,9 @@ Public Function ApplyLag( _
     Dim calType As String
     Dim lagVal As Long
     Dim anchorDate As Variant
+    Dim perfScope As clsPerfScope
+
+    Set perfScope = Profiler_BeginScope("ApplyLag", "Calendar")
 
     If Not HasValue(baseDate) Then
         ApplyLag = Empty
@@ -372,41 +384,50 @@ End Function
 ' EN: Returns the Signed Working Day Offset value without mutating input data.
 '------------------------------------------------------------------------------
 
-Public Function SignedWorkingDayOffset( _
-    ByVal requiredDate As Variant, _
-    ByVal actualDate As Variant, _
+Public Function SignedWorkingDayDelta( _
+    ByVal startDate As Variant, _
+    ByVal finishDate As Variant, _
     Optional ByVal calendarType As Variant = "") As Variant
 
     Dim diffVal As Variant
     Dim calType As String
 
-    If Not HasValue(requiredDate) Then
-        SignedWorkingDayOffset = Empty
+    If Not HasValue(startDate) Then
+        SignedWorkingDayDelta = Empty
         Exit Function
     End If
 
-    If Not HasValue(actualDate) Then
-        SignedWorkingDayOffset = Empty
+    If Not HasValue(finishDate) Then
+        SignedWorkingDayDelta = Empty
         Exit Function
     End If
 
     calType = NormalizeCalendarType(calendarType)
 
-    If CLng(CDbl(CDate(actualDate))) >= CLng(CDbl(CDate(requiredDate))) Then
-        diffVal = DateDiffWorkingDays(requiredDate, actualDate, calType)
+    If CLng(CDbl(CDate(finishDate))) >= CLng(CDbl(CDate(startDate))) Then
+        diffVal = DateDiffWorkingDays(startDate, finishDate, calType)
         If HasValue(diffVal) Then
-            SignedWorkingDayOffset = CLng(diffVal) - 1
-            If CLng(CDbl(CDate(actualDate))) > CLng(CDbl(CDate(requiredDate))) Then
-                If CLng(SignedWorkingDayOffset) = 0 Then SignedWorkingDayOffset = 1
+            SignedWorkingDayDelta = CLng(diffVal) - 1
+            If CLng(CDbl(CDate(finishDate))) > CLng(CDbl(CDate(startDate))) Then
+                If CLng(SignedWorkingDayDelta) = 0 Then SignedWorkingDayDelta = 1
             End If
         End If
     Else
-        diffVal = DateDiffWorkingDays(actualDate, requiredDate, calType)
+        diffVal = DateDiffWorkingDays(finishDate, startDate, calType)
         If HasValue(diffVal) Then
-            SignedWorkingDayOffset = -(CLng(diffVal) - 1)
-            If CLng(SignedWorkingDayOffset) = 0 Then SignedWorkingDayOffset = -1
+            SignedWorkingDayDelta = -(CLng(diffVal) - 1)
+            If CLng(SignedWorkingDayDelta) = 0 Then SignedWorkingDayDelta = -1
         End If
     End If
+
+End Function
+
+Public Function SignedWorkingDayOffset( _
+    ByVal requiredDate As Variant, _
+    ByVal actualDate As Variant, _
+    Optional ByVal calendarType As Variant = "") As Variant
+
+    SignedWorkingDayOffset = SignedWorkingDayDelta(requiredDate, actualDate, calendarType)
 
 End Function
 

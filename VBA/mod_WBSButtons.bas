@@ -468,8 +468,7 @@ Private Function WBS_Onboarding_StructureIsCurrent( _
         If cell.Borders(xlEdgeBottom).LineStyle <> xlContinuous Then Exit Function
         If cell.Borders(xlEdgeBottom).Color <> RGB(0, 0, 0) Then Exit Function
         If cell.Borders(xlEdgeBottom).Weight <> xlThin Then Exit Function
-
-
+
     Next key
 
     WBS_Onboarding_StructureIsCurrent = True
@@ -922,14 +921,14 @@ Private Function WBS_Onboarding_BuildHelpCommentMap() As Object
         "Rôle : indicateur de chemin critique sur le réseau de planning actuel.{NL}Calcul / logique :{NL}- Basé sur le float total courant.{NL}- Une tâche est critique si son Total Float est inférieur ou égal à 0.{NL}{NL}Utilité :{NL}- Aide à identifier les tâches qui pilotent directement la date projet actuelle.", _
         "Purpose: critical path indicator on the current schedule network.{NL}Calculation / logic:{NL}- Based on current total float.{NL}- A task is critical if its Total Float is less than or equal to 0.{NL}{NL}Use:{NL}- Helps identify tasks directly driving the current project finish date."
     WBS_Onboarding_AddHelpComment comments, "Critical Path REX", _
-        "Rôle : indicateur de chemin critique en mode REX / baseline network.{NL}Calcul / logique :{NL}- Basé sur la reconstruction du réseau baseline uniquement.{NL}- Une tâche est critique si son Total Float REX est inférieur ou égal à 0.{NL}{NL}Utilité :{NL}- Sert à l’analyse rétrospective ou comparative sur le réseau baseline.", _
-        "Purpose: critical path indicator in REX / baseline network mode.{NL}Calculation / logic:{NL}- Based on a reconstructed baseline-only network.{NL}- A task is critical if its Total Float REX is less than or equal to 0.{NL}{NL}Use:{NL}- Used for retrospective or comparative analysis on the baseline network."
+        "Rôle : indicateur de chemin critique sur l'état de référence Baseline.{NL}Calcul / logique :{NL}- Utilise le même graphe que les analytics Current.{NL}- Analyse les dates Baseline posées, sans compresser les gaps non exprimés en lag.{NL}- Une tâche est critique si son Total Float REX est inférieur ou égal à 0.{NL}{NL}Utilité :{NL}- Sert à l'analyse rétrospective ou comparative sur l'état Baseline.", _
+        "Purpose: critical path indicator on the Baseline reference state.{NL}Calculation / logic:{NL}- Uses the same graph as Current analytics.{NL}- Analyzes the placed Baseline dates without compressing gaps that are not expressed as lag.{NL}- A task is critical if its Total Float REX is less than or equal to 0.{NL}{NL}Use:{NL}- Used for retrospective or comparative analysis on the Baseline state."
     WBS_Onboarding_AddHelpComment comments, "Longest Path", _
         "Rôle : indique si la tâche appartient au plus long chemin du réseau de planning actuel.{NL}Calcul / logique :{NL}- Le moteur marque LONGEST les tâches non terminées reliées à la date de fin du réseau courant par des liens directeurs.{NL}{NL}Utilité :{NL}- Identifie la séquence active la plus longue jusqu'à la fin du projet.", _
         "Purpose: indicates whether the task belongs to the longest path in the current schedule network.{NL}Calculation / logic:{NL}- The engine marks unfinished tasks as LONGEST when driving links connect them to the current network finish.{NL}{NL}Use:{NL}- Identifies the longest active sequence leading to project completion."
     WBS_Onboarding_AddHelpComment comments, "Longest Path REX", _
-        "Rôle : sortie calculée réservée au plus long chemin du réseau baseline / REX.{NL}{NL}Règles :{NL}- Ne pas renseigner manuellement.{NL}- Peut rester vide lorsque le workflow REX ne produit pas cet indicateur.", _
-        "Purpose: calculated output reserved for the longest path in the baseline / REX network.{NL}{NL}Rules:{NL}- Do not enter a value manually.{NL}- May remain blank when the REX workflow does not produce this indicator."
+        "Rôle : sortie calculée réservée au plus long chemin sur l'état de référence Baseline / REX.{NL}{NL}Règles :{NL}- Ne pas renseigner manuellement.{NL}- Peut rester vide lorsque le workflow REX ne produit pas cet indicateur.", _
+        "Purpose: calculated output reserved for the longest path on the Baseline / REX reference state.{NL}{NL}Rules:{NL}- Do not enter a value manually.{NL}- May remain blank when the REX workflow does not produce this indicator."
     WBS_Onboarding_AddHelpComment comments, "Total Float", _
         "Rôle : marge totale sur le planning actuel.{NL}Calcul / logique :{NL}- Nombre de jours pendant lesquels la tâche peut glisser sans décaler la date de fin projet actuelle.{NL}{NL}Lecture :{NL}- 0 = critique{NL}- > 0 = marge disponible{NL}- < 0 = float négatif, planning incohérent ou contraint", _
         "Purpose: total float on the current schedule.{NL}Calculation / logic:{NL}- Number of days the task can slip without delaying the current project finish date.{NL}{NL}Reading:{NL}- 0 = critical{NL}- > 0 = available margin{NL}- < 0 = negative float, constrained or inconsistent schedule"
@@ -937,11 +936,11 @@ Private Function WBS_Onboarding_BuildHelpCommentMap() As Object
         "Rôle : marge libre sur le planning actuel.{NL}{NL}Calcul / logique :{NL}- Nombre de jours pendant lesquels la tâche peut glisser sans impacter le début au plus tôt de la tâche suivante.{NL}{NL}Cas particulier :{NL}- Si le float est négatif, cela signifie que la tâche ne respecte pas les contraintes du réseau.{NL}- La date de fin actuelle est déjà trop tardive par rapport aux exigences des successeurs (ou la durée est insuffisante).{NL}{NL}Utilité :{NL}- Mesure la marge locale, plus fine que le Total Float.{NL}- Permet d’identifier immédiatement les incohérences ou contraintes impossibles dans le planning.", _
         "Purpose: free float on the current schedule.{NL}{NL}Calculation / logic:{NL}- Number of days the task can slip without affecting the earliest start of the next task.{NL}{NL}Special case:{NL}- A negative float means the task violates network constraints.{NL}- The current finish is already too late relative to successor requirements (or duration is insufficient).{NL}{NL}Use:{NL}- Measures local margin, more granular than Total Float.{NL}- Helps detect inconsistencies or infeasible constraints in the schedule."
     WBS_Onboarding_AddHelpComment comments, "Total Float REX", _
-        "Rôle : marge totale dans le réseau baseline / REX.{NL}Calcul / logique :{NL}- Equivalent baseline du Total Float, calculé sur le réseau reconstruit de référence.{NL}{NL}Utilité :{NL}- Sert aux comparaisons et au retour d’expérience.", _
-        "Purpose: total float in the baseline / REX network.{NL}Calculation / logic:{NL}- Baseline equivalent of Total Float, calculated on the reconstructed reference network.{NL}{NL}Use:{NL}- Used for comparisons and lessons learned analysis."
+        "Rôle : marge totale sur l'état de référence Baseline / REX.{NL}Calcul / logique :{NL}- Equivalent Baseline du Total Float, calculé avec le même graphe que Current sur les dates Baseline posées.{NL}{NL}Utilité :{NL}- Sert aux comparaisons et au retour d'expérience.", _
+        "Purpose: total float on the Baseline / REX reference state.{NL}Calculation / logic:{NL}- Baseline equivalent of Total Float, calculated with the same graph as Current on the placed Baseline dates.{NL}{NL}Use:{NL}- Used for comparisons and lessons learned analysis."
     WBS_Onboarding_AddHelpComment comments, "Free Float REX", _
-        "Rôle : marge libre dans le réseau baseline / REX.{NL}Calcul / logique :{NL}- Equivalent baseline du Free Float, calculé sur le réseau reconstruit de référence.{NL}{NL}Utilité :{NL}- Sert à l’analyse fine des marges sur la logique baseline.", _
-        "Purpose: free float in the baseline / REX network.{NL}Calculation / logic:{NL}- Baseline equivalent of Free Float, calculated on the reconstructed reference network.{NL}{NL}Use:{NL}- Used for detailed float analysis on the baseline logic."
+        "Rôle : marge libre sur l'état de référence Baseline / REX.{NL}Calcul / logique :{NL}- Equivalent Baseline du Free Float, calculé avec le même graphe que Current sur les dates Baseline posées.{NL}{NL}Utilité :{NL}- Sert à l'analyse fine des marges sur l'état Baseline.", _
+        "Purpose: free float on the Baseline / REX reference state.{NL}Calculation / logic:{NL}- Baseline equivalent of Free Float, calculated with the same graph as Current on the placed Baseline dates.{NL}{NL}Use:{NL}- Used for detailed float analysis on the Baseline state."
     WBS_Onboarding_AddHelpComment comments, "Deadline Float", _
         "Rôle : marge entre la deadline de la tâche et sa date de fin calculée.{NL}Calcul / logique :{NL}- Deadline Float = Deadline - Calculated Finish.{NL}{NL}Lecture :{NL}- 0 = échéance atteinte exactement.{NL}- > 0 = marge disponible avant l'échéance.{NL}- < 0 = échéance dépassée.", _
         "Purpose: margin between the task deadline and its calculated finish date.{NL}Calculation / logic:{NL}- Deadline Float = Deadline - Calculated Finish.{NL}{NL}Reading:{NL}- 0 = deadline met exactly.{NL}- > 0 = available margin before the deadline.{NL}- < 0 = deadline exceeded."
@@ -1083,8 +1082,7 @@ Private Sub WBS_Onboarding_WriteQuickStart(ByVal ws As Worksheet)
     Dim textChanged As Boolean
 
     Set noteArea = ws.Range("O1:R2")
-    noteText = WBS_Onboarding_QuickStartText()
-
+    noteText = WBS_Onboarding_QuickStartText()
     requiredLabel = WBS_Onboarding_RequiredLabel()
 
     If Not CBool(noteArea.MergeCells) Or _

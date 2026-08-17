@@ -577,13 +577,13 @@ Public Function CalcBridge_BuildMissingBaselineRexMessage( _
 
     CalcBridge_BuildMissingBaselineRexMessage = _
         "FR:" & vbCrLf & _
-        "Analytics REX partiellement non calculées : Baseline Duration manquante sur au moins une tâche feuille." & vbCrLf & _
-        "-> compléter Baseline Duration sur les lignes listées ci-dessous." & vbCrLf & vbCrLf & _
+        "Analytics REX partiellement non calculées : état Baseline temporel incomplet sur au moins une tâche feuille." & vbCrLf & _
+        "-> compléter une Baseline explicite ou une chaîne de dépendances Baseline exploitable sur les lignes listées ci-dessous." & vbCrLf & vbCrLf & _
         "IDs : " & idsLine & vbCrLf & _
         "WBS : " & wbsLine & vbCrLf & vbCrLf & _
         "EN:" & vbCrLf & _
-        "REX analytics partially not calculated: Baseline Duration is missing on at least one leaf task." & vbCrLf & _
-        "-> fill Baseline Duration on the lines listed below." & vbCrLf & vbCrLf & _
+        "REX analytics partially not calculated: the Baseline temporal state is incomplete on at least one leaf task." & vbCrLf & _
+        "-> complete an explicit Baseline or a usable Baseline dependency chain on the lines listed below." & vbCrLf & vbCrLf & _
         "IDs: " & idsLine & vbCrLf & _
         "WBS: " & wbsLine
 

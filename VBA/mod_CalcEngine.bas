@@ -244,7 +244,8 @@ Public Sub ComputeCurrentFloatAndCritical( _
     Optional ByRef sourceData As Variant, _
     Optional ByRef resultTotalFloat As Variant, _
     Optional ByRef resultFreeFloat As Variant, _
-    Optional ByRef resultCriticalPath As Variant)
+    Optional ByRef resultCriticalPath As Variant, _
+    Optional ByVal sharedNetworkFinishById As Object = Nothing)
 
     Dim perfScope As clsPerfScope
 
@@ -346,7 +347,11 @@ Public Sub ComputeCurrentFloatAndCritical( _
     Next idKey
 
     If useMultiNetwork Then
-        Set networkFinishById = BuildCurrentNetworkFinishById(dataArr, mapCalc, idToRow, childrenById, validIds)
+        If sharedNetworkFinishById Is Nothing Then
+            Set networkFinishById = BuildCurrentNetworkFinishById(dataArr, mapCalc, idToRow, childrenById, validIds)
+        Else
+            Set networkFinishById = sharedNetworkFinishById
+        End If
     End If
 
     ReDim outTF(1 To rowCount, 1 To 1)
@@ -691,7 +696,12 @@ Public Sub ComputeLongestPath( _
     Optional ByVal analyticsPredLagBySuccPred As Object = Nothing, _
     Optional ByVal analyticsPredTypeBySuccPred As Object = Nothing, _
     Optional ByRef sourceData As Variant, _
-    Optional ByRef resultLongestPath As Variant)
+    Optional ByRef resultLongestPath As Variant, _
+    Optional ByVal sharedNetworkFinishById As Object = Nothing, _
+    Optional ByVal startColumnName As String = "Calculated Start", _
+    Optional ByVal finishColumnName As String = "Calculated Finish", _
+    Optional ByVal outputColumnName As String = "Longest Path", _
+    Optional ByVal excludeActualFinished As Boolean = True)
 
     Dim perfScope As clsPerfScope
 
@@ -734,10 +744,10 @@ Public Sub ComputeLongestPath( _
     If predsById Is Nothing Then Exit Sub
     If childrenById Is Nothing Then Exit Sub
     If validIds Is Nothing Then Exit Sub
-    If Not mapCalc.Exists("Calculated Start") Then Exit Sub
-    If Not mapCalc.Exists("Calculated Finish") Then Exit Sub
+    If Not mapCalc.Exists(startColumnName) Then Exit Sub
+    If Not mapCalc.Exists(finishColumnName) Then Exit Sub
     If Not inMemoryResult Then
-        If Not mapCalc.Exists("Longest Path") Then Exit Sub
+        If Not mapCalc.Exists(outputColumnName) Then Exit Sub
     End If
 
     ReDim outLP(1 To rowCount, 1 To 1)
@@ -760,10 +770,10 @@ Public Sub ComputeLongestPath( _
 
     For Each idKey In validIds.Keys
         rowIndex = CLng(idToRow(CStr(idKey)))
-        finishVal = GetCellValue(dataArr(rowIndex, mapCalc("Calculated Finish")))
+        finishVal = GetCellValue(dataArr(rowIndex, mapCalc(finishColumnName)))
 
         If HasValue(finishVal) Then
-            If Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
+            If (Not excludeActualFinished) Or Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
                 If Not HasValue(projectFinish) Then
                     projectFinish = finishVal
                 ElseIf CDbl(finishVal) > CDbl(projectFinish) Then
@@ -777,13 +787,17 @@ Public Sub ComputeLongestPath( _
         If inMemoryResult Then
             resultLongestPath = outLP
         Else
-            tblCalc.ListColumns("Longest Path").DataBodyRange.value = outLP
+            tblCalc.ListColumns(outputColumnName).DataBodyRange.value = outLP
         End If
         Exit Sub
     End If
 
     If IsCriticalPathMultiNetworkEnabled() Then
-        Set networkFinishById = BuildCurrentNetworkFinishById(dataArr, mapCalc, idToRow, childrenById, validIds)
+        If sharedNetworkFinishById Is Nothing Then
+            Set networkFinishById = BuildNetworkFinishByIdFromColumn(dataArr, mapCalc, idToRow, childrenById, validIds, finishColumnName, excludeActualFinished)
+        Else
+            Set networkFinishById = sharedNetworkFinishById
+        End If
     Else
         Set networkFinishById = Nothing
     End If
@@ -791,10 +805,10 @@ Public Sub ComputeLongestPath( _
     For Each idKey In validIds.Keys
         taskId = CStr(idKey)
         rowIndex = CLng(idToRow(taskId))
-        finishVal = GetCellValue(dataArr(rowIndex, mapCalc("Calculated Finish")))
+        finishVal = GetCellValue(dataArr(rowIndex, mapCalc(finishColumnName)))
 
         If HasValue(finishVal) Then
-            If Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
+            If (Not excludeActualFinished) Or Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
                 If Not networkFinishById Is Nothing Then
                     If networkFinishById.Exists(taskId) Then
                         targetFinish = networkFinishById(taskId)
@@ -825,7 +839,7 @@ Public Sub ComputeLongestPath( _
 
                     effectiveLag = CDbl(predLagBySuccPred(linkKey))
                     linkType = CStr(predTypeBySuccPred(linkKey))
-                    If CalcEngine_IsDrivingLongestPathLink(dataArr, mapCalc, idToRow, taskId, CStr(predId), linkType, effectiveLag) Then
+                    If CalcEngine_IsDrivingLongestPathLink(dataArr, mapCalc, idToRow, taskId, CStr(predId), linkType, effectiveLag, startColumnName, finishColumnName) Then
                         CalcEngine_AddLongestPathTask CStr(predId), lpById, queuedById, queue
                     End If
                 End If
@@ -835,7 +849,7 @@ Public Sub ComputeLongestPath( _
 
     For Each idKey In lpById.Keys
         rowIndex = CLng(idToRow(CStr(idKey)))
-        If Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
+        If (Not excludeActualFinished) Or Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
             outLP(rowIndex, 1) = "LONGEST"
         End If
     Next idKey
@@ -843,7 +857,7 @@ Public Sub ComputeLongestPath( _
     If inMemoryResult Then
         resultLongestPath = outLP
     Else
-        tblCalc.ListColumns("Longest Path").DataBodyRange.value = outLP
+        tblCalc.ListColumns(outputColumnName).DataBodyRange.value = outLP
     End If
 
 End Sub
@@ -884,7 +898,9 @@ Private Function CalcEngine_IsDrivingLongestPathLink( _
     ByVal succId As String, _
     ByVal predId As String, _
     ByVal linkType As String, _
-    ByVal effectiveLag As Double) As Boolean
+    ByVal effectiveLag As Double, _
+    Optional ByVal startColumnName As String = "Calculated Start", _
+    Optional ByVal finishColumnName As String = "Calculated Finish") As Boolean
 
     Dim succRow As Long
     Dim predRow As Long
@@ -901,10 +917,10 @@ Private Function CalcEngine_IsDrivingLongestPathLink( _
     succRow = CLng(idToRow(succId))
     predRow = CLng(idToRow(predId))
 
-    succStart = GetCellValue(dataArr(succRow, mapCalc("Calculated Start")))
-    succFinish = GetCellValue(dataArr(succRow, mapCalc("Calculated Finish")))
-    predStart = GetCellValue(dataArr(predRow, mapCalc("Calculated Start")))
-    predFinish = GetCellValue(dataArr(predRow, mapCalc("Calculated Finish")))
+    succStart = GetCellValue(dataArr(succRow, mapCalc(startColumnName)))
+    succFinish = GetCellValue(dataArr(succRow, mapCalc(finishColumnName)))
+    predStart = GetCellValue(dataArr(predRow, mapCalc(startColumnName)))
+    predFinish = GetCellValue(dataArr(predRow, mapCalc(finishColumnName)))
     succCal = NormalizeCalendarType(dataArr(succRow, mapCalc("Cal")))
 
     Select Case UCase$(Trim$(linkType))
@@ -943,6 +959,208 @@ Private Function CalcEngine_DatesEqual(ByVal leftVal As Variant, ByVal rightVal 
 
 End Function
 '------------------------------------------------------------------------------
+' FR: Construit l'etat temporel Baseline REX hybride explicite + reseau.
+' EN: Builds the hybrid explicit + network Baseline REX temporal state.
+'------------------------------------------------------------------------------
+Public Function BuildBaselineRexTemporalState( _
+    ByRef dataArr As Variant, _
+    ByVal mapCalc As Object, _
+    ByVal idToRow As Object, _
+    ByVal predsById As Object, _
+    ByVal validIds As Object, _
+    ByVal topoOrder As Collection, _
+    ByVal predLagBySuccPred As Object, _
+    ByVal predTypeBySuccPred As Object, _
+    ByVal rexStartById As Object, _
+    ByVal rexFinishById As Object, _
+    ByVal rexDurationById As Object, _
+    ByVal diagnosticsById As Object) As Boolean
+
+    Dim idKey As Variant
+    Dim predId As Variant
+    Dim taskId As String
+    Dim rowIndex As Long
+    Dim taskCal As String
+    Dim baselineStart As Variant
+    Dim baselineFinish As Variant
+    Dim baselineDuration As Variant
+    Dim candidateStart As Variant
+    Dim candidateFinish As Variant
+    Dim bestStart As Variant
+    Dim bestFinish As Variant
+    Dim finishFromStart As Variant
+    Dim startFromFinish As Variant
+    Dim linkKey As String
+    Dim linkType As String
+    Dim effectiveLag As Double
+    Dim hasPredInput As Boolean
+
+    BuildBaselineRexTemporalState = False
+    If mapCalc Is Nothing Then Exit Function
+    If idToRow Is Nothing Then Exit Function
+    If predsById Is Nothing Then Exit Function
+    If validIds Is Nothing Then Exit Function
+    If topoOrder Is Nothing Then Exit Function
+    If predLagBySuccPred Is Nothing Then Exit Function
+    If predTypeBySuccPred Is Nothing Then Exit Function
+    If rexStartById Is Nothing Then Exit Function
+    If rexFinishById Is Nothing Then Exit Function
+    If rexDurationById Is Nothing Then Exit Function
+    If diagnosticsById Is Nothing Then Exit Function
+
+    For Each idKey In topoOrder
+        taskId = CStr(idKey)
+        If Not validIds.Exists(taskId) Then GoTo NextRexTemporalTask
+        If Not idToRow.Exists(taskId) Then GoTo NextRexTemporalTask
+
+        rowIndex = CLng(idToRow(taskId))
+        taskCal = NormalizeCalendarType(dataArr(rowIndex, mapCalc("Cal")))
+        baselineDuration = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Duration")))
+        baselineStart = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Start")))
+        baselineFinish = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Finish")))
+
+        If Not HasValue(baselineDuration) Then
+            If TaskTypeRules_IsMilestoneRow(dataArr, mapCalc, rowIndex) Then
+                baselineDuration = 1
+            ElseIf HasValue(baselineStart) And HasValue(baselineFinish) Then
+                baselineDuration = DateDiffWorkingDays(baselineStart, baselineFinish, taskCal)
+            End If
+        End If
+
+        If Not HasValue(baselineDuration) Then
+            diagnosticsById(taskId) = "Baseline temporal duration cannot be inferred."
+            GoTo NextRexTemporalTask
+        End If
+
+        If HasValue(baselineStart) And HasValue(baselineFinish) Then
+            rexStartById(taskId) = baselineStart
+            rexFinishById(taskId) = baselineFinish
+            rexDurationById(taskId) = baselineDuration
+            GoTo NextRexTemporalTask
+        End If
+
+        If HasValue(baselineStart) Then
+            rexStartById(taskId) = baselineStart
+            rexFinishById(taskId) = AddWorkingDays(baselineStart, baselineDuration, taskCal)
+            rexDurationById(taskId) = baselineDuration
+            GoTo NextRexTemporalTask
+        End If
+
+        If HasValue(baselineFinish) Then
+            rexFinishById(taskId) = baselineFinish
+            rexStartById(taskId) = SubtractWorkingDays(baselineFinish, baselineDuration, taskCal)
+            rexDurationById(taskId) = baselineDuration
+            GoTo NextRexTemporalTask
+        End If
+
+        bestStart = Empty
+        bestFinish = Empty
+        hasPredInput = False
+
+        If predsById.Exists(taskId) Then
+            For Each predId In predsById(taskId)
+                If rexStartById.Exists(CStr(predId)) And rexFinishById.Exists(CStr(predId)) Then
+                    linkKey = taskId & "|" & CStr(predId)
+                    If Not predLagBySuccPred.Exists(linkKey) Or Not predTypeBySuccPred.Exists(linkKey) Then
+                        diagnosticsById(taskId) = "Baseline dependency attributes are incomplete."
+                        GoTo NextRexTemporalTask
+                    End If
+
+                    hasPredInput = True
+                    effectiveLag = CDbl(predLagBySuccPred(linkKey))
+                    linkType = UCase$(Trim$(CStr(predTypeBySuccPred(linkKey))))
+
+                    Select Case linkType
+                        Case "SS"
+                            candidateStart = ApplyLag(rexStartById(CStr(predId)), effectiveLag, taskCal, "SS")
+                            If HasValue(candidateStart) Then
+                                If Not HasValue(bestStart) Or CDbl(candidateStart) > CDbl(bestStart) Then bestStart = candidateStart
+                            End If
+                        Case "FF"
+                            candidateFinish = ApplyLag(rexFinishById(CStr(predId)), effectiveLag, taskCal, "FF")
+                            If HasValue(candidateFinish) Then
+                                If Not HasValue(bestFinish) Or CDbl(candidateFinish) > CDbl(bestFinish) Then bestFinish = candidateFinish
+                            End If
+                        Case "FS", ""
+                            candidateStart = ApplyLag(rexFinishById(CStr(predId)), effectiveLag, taskCal, "FS")
+                            If HasValue(candidateStart) Then
+                                If Not HasValue(bestStart) Or CDbl(candidateStart) > CDbl(bestStart) Then bestStart = candidateStart
+                            End If
+                        Case Else
+                            diagnosticsById(taskId) = "Baseline dependency type is invalid."
+                            GoTo NextRexTemporalTask
+                    End Select
+                End If
+            Next predId
+        End If
+
+        If HasValue(bestStart) And HasValue(bestFinish) Then
+            finishFromStart = AddWorkingDays(bestStart, baselineDuration, taskCal)
+            startFromFinish = SubtractWorkingDays(bestFinish, baselineDuration, taskCal)
+            If HasValue(startFromFinish) And CDbl(startFromFinish) > CDbl(bestStart) Then
+                rexStartById(taskId) = startFromFinish
+                rexFinishById(taskId) = bestFinish
+            Else
+                rexStartById(taskId) = bestStart
+                rexFinishById(taskId) = finishFromStart
+            End If
+            rexDurationById(taskId) = baselineDuration
+        ElseIf HasValue(bestStart) Then
+            rexStartById(taskId) = bestStart
+            rexFinishById(taskId) = AddWorkingDays(bestStart, baselineDuration, taskCal)
+            rexDurationById(taskId) = baselineDuration
+        ElseIf HasValue(bestFinish) Then
+            rexFinishById(taskId) = bestFinish
+            rexStartById(taskId) = SubtractWorkingDays(bestFinish, baselineDuration, taskCal)
+            rexDurationById(taskId) = baselineDuration
+        ElseIf hasPredInput Then
+            diagnosticsById(taskId) = "Baseline dependency dates could not be projected."
+        Else
+            diagnosticsById(taskId) = "Baseline temporal anchor missing."
+        End If
+
+NextRexTemporalTask:
+    Next idKey
+
+    BuildBaselineRexTemporalState = (diagnosticsById.Count = 0)
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Projette l'etat temporel Baseline REX complete dans un buffer CALC.
+' EN: Projects the completed Baseline REX temporal state into a CALC buffer.
+'------------------------------------------------------------------------------
+Public Sub ApplyBaselineRexTemporalStateToArray( _
+    ByRef targetArr As Variant, _
+    ByVal mapCalc As Object, _
+    ByVal idToRow As Object, _
+    ByVal rexStartById As Object, _
+    ByVal rexFinishById As Object, _
+    ByVal rexDurationById As Object)
+
+    Dim idKey As Variant
+    Dim taskId As String
+    Dim rowIndex As Long
+
+    If mapCalc Is Nothing Then Exit Sub
+    If idToRow Is Nothing Then Exit Sub
+    If rexStartById Is Nothing Then Exit Sub
+    If rexFinishById Is Nothing Then Exit Sub
+    If rexDurationById Is Nothing Then Exit Sub
+
+    For Each idKey In rexStartById.Keys
+        taskId = CStr(idKey)
+        If idToRow.Exists(taskId) Then
+            rowIndex = CLng(idToRow(taskId))
+            targetArr(rowIndex, mapCalc("Baseline Start")) = rexStartById(taskId)
+            If rexFinishById.Exists(taskId) Then targetArr(rowIndex, mapCalc("Baseline Finish")) = rexFinishById(taskId)
+            If rexDurationById.Exists(taskId) Then targetArr(rowIndex, mapCalc("Baseline Duration")) = rexDurationById(taskId)
+        End If
+    Next idKey
+
+End Sub
+
+'------------------------------------------------------------------------------
 ' FR: Calcule Critical Path REX pour le moteur calculation engine.
 ' EN: Computes Critical Path REX for the calculation engine engine.
 '------------------------------------------------------------------------------
@@ -961,7 +1179,8 @@ Public Sub ComputeCriticalPathREX( _
     ByVal errMissingBaselineForREX As Object, _
     Optional ByVal consoleMessages As Collection = Nothing, _
     Optional ByVal analyticsPredLagBySuccPred As Object = Nothing, _
-    Optional ByVal analyticsPredTypeBySuccPred As Object = Nothing)
+    Optional ByVal analyticsPredTypeBySuccPred As Object = Nothing, _
+    Optional ByVal executionNetwork As clsCompiledExecutionNetwork = Nothing)
 
     Dim perfScope As clsPerfScope
 
@@ -969,6 +1188,7 @@ Public Sub ComputeCriticalPathREX( _
     Dim dataArr As Variant
     Dim rexStartById As Object
     Dim rexFinishById As Object
+    Dim rexDurationById As Object
     Dim rexLateStartById As Object
     Dim rexLateFinishById As Object
     Dim rexTotalFloatById As Object
@@ -990,6 +1210,7 @@ Public Sub ComputeCriticalPathREX( _
 
     Dim baselineDuration As Variant
     Dim baselineStart As Variant
+    Dim baselineFinish As Variant
     Dim startVal As Variant
     Dim finishVal As Variant
     Dim effectiveLag As Double
@@ -1021,6 +1242,7 @@ Public Sub ComputeCriticalPathREX( _
 
     Set rexStartById = CreateObject("Scripting.Dictionary")
     Set rexFinishById = CreateObject("Scripting.Dictionary")
+    Set rexDurationById = CreateObject("Scripting.Dictionary")
     Set rexLateStartById = CreateObject("Scripting.Dictionary")
     Set rexLateFinishById = CreateObject("Scripting.Dictionary")
     Set rexTotalFloatById = CreateObject("Scripting.Dictionary")
@@ -1047,119 +1269,32 @@ Public Sub ComputeCriticalPathREX( _
     ReDim outTF(1 To tblCalc.ListRows.Count, 1 To 1)
     ReDim outFF(1 To tblCalc.ListRows.Count, 1 To 1)
 
-    For Each idKey In topoOrder
+    If Not BuildBaselineRexTemporalState( _
+        dataArr, mapCalc, idToRow, predsById, validIds, topoOrder, _
+        predLagBySuccPred, predTypeBySuccPred, _
+        rexStartById, rexFinishById, rexDurationById, errMissingBaselineForREX) Then
+        Exit Sub
+    End If
 
-        taskId = CStr(idKey)
-        rowIndex = idToRow(taskId)
-
-        baselineDuration = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Duration")))
-        baselineStart = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Start")))
-        taskCal = NormalizeCalendarType(dataArr(rowIndex, mapCalc("Cal")))
-
-        If Not HasValue(baselineDuration) Then
-            If TaskTypeRules_IsMilestoneRow(dataArr, mapCalc, rowIndex) Then
-                baselineDuration = 1
+    For Each idKey In rexFinishById.Keys
+        finishVal = rexFinishById(CStr(idKey))
+        If HasValue(finishVal) Then
+            If Not HasValue(projectBaselineFinish) Then
+                projectBaselineFinish = finishVal
+            ElseIf CDbl(finishVal) > CDbl(projectBaselineFinish) Then
+                projectBaselineFinish = finishVal
             End If
         End If
-
-        bestStart = Empty
-        hasValidPred = False
-
-        If Not HasValue(baselineDuration) Then
-            errMissingBaselineForREX(taskId) = True
-            GoTo NextRexForward
-        End If
-
-        Set preds = predsById(taskId)
-
-        For Each predId In preds
-
-            If validIds.Exists(CStr(predId)) Then
-
-                hasValidPred = True
-                linkKey = taskId & "|" & CStr(predId)
-
-                effectiveLag = CDbl(predLagBySuccPred(linkKey))
-                linkType = CStr(predTypeBySuccPred(linkKey))
-                succCal = taskCal
-
-                Select Case linkType
-
-                    Case "SS"
-                        If rexStartById.Exists(CStr(predId)) Then
-                            candidateStart = ApplyLag(rexStartById(CStr(predId)), effectiveLag, taskCal, "SS")
-
-                            If Not HasValue(bestStart) Then
-                                bestStart = candidateStart
-                            ElseIf candidateStart > CDbl(bestStart) Then
-                                bestStart = candidateStart
-                            End If
-                        End If
-
-                    Case "FF"
-                        If rexFinishById.Exists(CStr(predId)) Then
-                            candidateDate = ApplyLag(rexFinishById(CStr(predId)), effectiveLag, taskCal, "FF")
-                            candidateStart = SubtractWorkingDays(candidateDate, baselineDuration, taskCal)
-
-                            If Not HasValue(bestStart) Then
-                                bestStart = candidateStart
-                            ElseIf candidateStart > CDbl(bestStart) Then
-                                bestStart = candidateStart
-                            End If
-                        End If
-
-                    Case Else
-                        If rexFinishById.Exists(CStr(predId)) Then
-                            candidateStart = ApplyLag(rexFinishById(CStr(predId)), effectiveLag, taskCal, "FS")
-
-                            If Not HasValue(bestStart) Then
-                                bestStart = candidateStart
-                            ElseIf candidateStart > CDbl(bestStart) Then
-                                bestStart = candidateStart
-                            End If
-                        End If
-
-                End Select
-
-            End If
-
-        Next predId
-
-        If hasValidPred Then
-            If Not HasValue(bestStart) Then
-                errMissingBaselineForREX(taskId) = True
-                GoTo NextRexForward
-            End If
-
-            startVal = bestStart
-        Else
-            If Not HasValue(baselineStart) Then
-                errMissingBaselineForREX(taskId) = True
-                GoTo NextRexForward
-            End If
-
-            startVal = baselineStart
-        End If
-
-        finishVal = AddWorkingDays(startVal, baselineDuration, taskCal)
-
-        rexStartById(taskId) = startVal
-        rexFinishById(taskId) = finishVal
-
-        If Not HasValue(projectBaselineFinish) Then
-            projectBaselineFinish = finishVal
-        ElseIf CDbl(finishVal) > CDbl(projectBaselineFinish) Then
-            projectBaselineFinish = finishVal
-        End If
-
-NextRexForward:
     Next idKey
 
-    If errMissingBaselineForREX.Count > 0 Then Exit Sub
     If Not HasValue(projectBaselineFinish) Then Exit Sub
 
     If useMultiNetwork Then
-        Set networkFinishById = BuildRexNetworkFinishById(rexFinishById, childrenById, validIds)
+        If executionNetwork Is Nothing Then
+            Set networkFinishById = BuildRexNetworkFinishById(rexFinishById, childrenById, validIds)
+        Else
+            Set networkFinishById = CompiledNetwork_BuildFinishByIdFromValues(executionNetwork, rexFinishById)
+        End If
     End If
 
     For r = topoOrder.Count To 1 Step -1
@@ -1171,14 +1306,12 @@ NextRexForward:
         taskId = CStr(idKey)
         rowIndex = idToRow(taskId)
 
-        baselineDuration = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Duration")))
-        taskCal = NormalizeCalendarType(dataArr(rowIndex, mapCalc("Cal")))
-
-        If Not HasValue(baselineDuration) Then
-            If TaskTypeRules_IsMilestoneRow(dataArr, mapCalc, rowIndex) Then
-                baselineDuration = 1
-            End If
+        If rexDurationById.Exists(taskId) Then
+            baselineDuration = rexDurationById(taskId)
+        Else
+            baselineDuration = GetCellValue(dataArr(rowIndex, mapCalc("Baseline Duration")))
         End If
+        taskCal = NormalizeCalendarType(dataArr(rowIndex, mapCalc("Cal")))
 
         candidateLateFinish = Empty
 
@@ -1253,7 +1386,7 @@ NextRexBackward:
 
         If rexLateStartById.Exists(taskId) And rexStartById.Exists(taskId) Then
 
-            tf = CDbl(DateDiffWorkingDays(rexStartById(taskId), rexLateStartById(taskId), NormalizeCalendarType(dataArr(rowIndex, mapCalc("Cal")))) - 1)
+            tf = CDbl(SignedWorkingDayDelta(rexStartById(taskId), rexLateStartById(taskId), NormalizeCalendarType(dataArr(rowIndex, mapCalc("Cal")))))
             rexTotalFloatById(taskId) = tf
 
             If tf < 0 Then hasNegativeFloat = True
@@ -1664,15 +1797,21 @@ Public Sub Push_Analytics_Back_To_WBS()
         "Critical Path", _
         "Longest Path", _
         "Critical Path REX", _
+        "Longest Path REX", _
         "Total Float", _
         "Free Float", _
         "Total Float REX", _
         "Free Float REX", _
         "Deadline Float"))
 
-    If mapWBS.Exists("Critical Path") And mapWBS.Exists("Critical Path REX") And mapWBS.Exists("Longest Path") Then
+    If mapWBS.Exists("Critical Path") And mapWBS.Exists("Critical Path REX") And _
+       mapWBS.Exists("Longest Path") And mapWBS.Exists("Longest Path REX") Then
         pathStartCol = CLng(mapWBS("Critical Path"))
-        blockPath = tblWBS.DataBodyRange.Cells(1, pathStartCol).Resize(rowCount, 3).Value2
+        If CLng(mapWBS("Critical Path REX")) = pathStartCol + 1 And _
+           CLng(mapWBS("Longest Path")) = pathStartCol + 2 And _
+           CLng(mapWBS("Longest Path REX")) = pathStartCol + 3 Then
+            blockPath = tblWBS.DataBodyRange.Cells(1, pathStartCol).Resize(rowCount, 4).Value2
+        End If
     End If
 
     If mapWBS.Exists("Total Float") And mapWBS.Exists("Free Float") And _
@@ -1695,6 +1834,12 @@ Public Sub Push_Analytics_Back_To_WBS()
                     If mapCalc.Exists("Critical Path") Then blockPath(r, 1) = arrCalc(calcRow, mapCalc("Critical Path"))
                     If mapCalc.Exists("Critical Path REX") Then blockPath(r, 2) = arrCalc(calcRow, mapCalc("Critical Path REX"))
                     If mapCalc.Exists("Longest Path") Then blockPath(r, 3) = arrCalc(calcRow, mapCalc("Longest Path"))
+                    If mapCalc.Exists("Longest Path REX") Then blockPath(r, 4) = arrCalc(calcRow, mapCalc("Longest Path REX"))
+                Else
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Critical Path"
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Critical Path REX"
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Longest Path"
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Longest Path REX"
                 End If
 
                 If IsArray(blockFloat) Then
@@ -1711,6 +1856,12 @@ Public Sub Push_Analytics_Back_To_WBS()
                     blockPath(r, 1) = Empty
                     blockPath(r, 2) = Empty
                     blockPath(r, 3) = Empty
+                    blockPath(r, 4) = Empty
+                Else
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Critical Path"
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Critical Path REX"
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Longest Path"
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Longest Path REX"
                 End If
 
                 If IsArray(blockFloat) Then
@@ -1727,7 +1878,7 @@ Public Sub Push_Analytics_Back_To_WBS()
     Next r
 
     If IsArray(blockPath) Then
-        tblWBS.DataBodyRange.Cells(1, pathStartCol).Resize(rowCount, 3).Value2 = blockPath
+        tblWBS.DataBodyRange.Cells(1, pathStartCol).Resize(rowCount, 4).Value2 = blockPath
         analyticsBlockWrites = analyticsBlockWrites + 1
     End If
 
@@ -1813,6 +1964,7 @@ Private Function IsAllowedAnalyticsPushField(ByVal fieldName As String) As Boole
         Case "Critical Path", _
              "Longest Path", _
              "Critical Path REX", _
+             "Longest Path REX", _
              "Total Float", _
              "Free Float", _
              "Total Float REX", _
@@ -2989,6 +3141,71 @@ Private Function BuildCurrentNetworkFinishById( _
 
 End Function
 
+'------------------------------------------------------------------------------
+' FR: Construit un index de finish par composante a partir d'une colonne temporelle fournie.
+' EN: Builds a component finish index from the supplied temporal finish column.
+'------------------------------------------------------------------------------
+Private Function BuildNetworkFinishByIdFromColumn( _
+    ByRef dataArr As Variant, _
+    ByVal mapCalc As Object, _
+    ByVal idToRow As Object, _
+    ByVal childrenById As Object, _
+    ByVal validIds As Object, _
+    ByVal finishColumnName As String, _
+    ByVal excludeActualFinished As Boolean) As Object
+
+    Dim finishById As Object
+    Dim componentIds As Collection
+    Dim visited As Object
+    Dim idKey As Variant
+    Dim compId As Variant
+    Dim rowIndex As Long
+    Dim finishVal As Variant
+    Dim componentFinish As Variant
+
+    Set finishById = CreateObject("Scripting.Dictionary")
+    Set visited = CreateObject("Scripting.Dictionary")
+
+    If mapCalc Is Nothing Then GoTo SafeExit
+    If Not mapCalc.Exists(finishColumnName) Then GoTo SafeExit
+
+    For Each idKey In validIds.Keys
+
+        If Not visited.Exists(CStr(idKey)) Then
+
+            Set componentIds = GetUndirectedNetworkComponent(CStr(idKey), childrenById, validIds, visited)
+            componentFinish = Empty
+
+            For Each compId In componentIds
+                rowIndex = idToRow(CStr(compId))
+
+                If (Not excludeActualFinished) Or Not IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
+                    finishVal = GetCellValue(dataArr(rowIndex, mapCalc(finishColumnName)))
+
+                    If HasValue(finishVal) Then
+                        If Not HasValue(componentFinish) Then
+                            componentFinish = finishVal
+                        ElseIf CDbl(finishVal) > CDbl(componentFinish) Then
+                            componentFinish = finishVal
+                        End If
+                    End If
+                End If
+            Next compId
+
+            If HasValue(componentFinish) Then
+                For Each compId In componentIds
+                    finishById(CStr(compId)) = componentFinish
+                Next compId
+            End If
+
+        End If
+
+    Next idKey
+
+SafeExit:
+    Set BuildNetworkFinishByIdFromColumn = finishById
+
+End Function
 '------------------------------------------------------------------------------
 ' FR: Construit l'index Rex Network Finish By ID a partir des donnees fournies par l'appelant.
 ' EN: Builds the Rex Network Finish By ID index from data supplied by the caller.

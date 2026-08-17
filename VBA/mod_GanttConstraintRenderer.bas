@@ -47,6 +47,14 @@ Private Const LINK_EDGE_PADDING As Double = 8
 Private Const LINK_ANCHOR_START As String = "START"
 Private Const LINK_ANCHOR_FINISH As String = "FINISH"
 
+Private gCstrExistingShapes As Object
+Private gCstrExpectedNames As Object
+Private gCstrAdded As Long
+Private gCstrModified As Long
+Private gCstrDeleted As Long
+Private gCstrSkipped As Long
+Private gCstrTypeMismatchRecreated As Long
+
 '------------------------------------------------------------------------------
 ' FR: Gere l'affichage ou la lecture des contraintes visuelles GANTT sans modifier le moteur de calcul.
 ' EN: Handles GANTT visual constraint display or lookup without changing the calculation engine.
@@ -181,10 +189,13 @@ Public Sub DrawConstraintMarkers_Gantt( _
 
     Set perfScope = Profiler_BeginScope("DrawConstraintMarkers_Gantt", "Constraint Render")
 
-    If constraintById Is Nothing Then Exit Sub
-    If constraintById.Count = 0 Then Exit Sub
-    If Not HasValue(projectStart) Then Exit Sub
-    If totalDays < 1 Then Exit Sub
+    BeginConstraintRetainedRender ws
+    On Error GoTo Failed
+
+    If constraintById Is Nothing Then GoTo Done
+    If constraintById.Count = 0 Then GoTo Done
+    If Not HasValue(projectStart) Then GoTo Done
+    If totalDays < 1 Then GoTo Done
 
     rowCount = UBound(dataArr, 1)
 
@@ -258,6 +269,144 @@ Public Sub DrawConstraintMarkers_Gantt( _
 
 NextRow:
     Next r
+
+Done:
+    EndConstraintRetainedRender ws
+    Exit Sub
+
+Failed:
+    EndConstraintRetainedRender ws
+    Err.Raise Err.Number, Err.source, Err.Description
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR:
+' Retire uniquement l'overlay de contraintes et restaure la grille timeline.
+'
+' EN:
+' Removes only the constraint overlay and restores the timeline grid.
+'------------------------------------------------------------------------------
+Public Sub GanttConstraint_ClearOverlay( _
+    ByVal ws As Worksheet, _
+    ByVal rowCount As Long, _
+    ByVal totalDays As Long)
+
+    Dim i As Long
+    Dim lastRow As Long
+    Dim lastCol As Long
+    Dim deletedCount As Long
+
+    If ws Is Nothing Then Exit Sub
+
+    For i = ws.Shapes.Count To 1 Step -1
+        If Left$(CStr(ws.Shapes(i).Name), 5) = "CSTR_" Then
+            ws.Shapes(i).Delete
+            deletedCount = deletedCount + 1
+        End If
+    Next i
+
+    lastRow = FIRST_TASK_ROW + rowCount - 1
+    lastCol = FIRST_TIMELINE_COL + totalDays - 1
+    If lastRow >= FIRST_TASK_ROW And lastCol >= FIRST_TIMELINE_COL Then
+        With ws.Range(ws.cells(FIRST_TASK_ROW, FIRST_TIMELINE_COL), ws.cells(lastRow, lastCol))
+            .Borders(xlInsideVertical).LineStyle = xlDot
+            .Borders(xlInsideHorizontal).LineStyle = xlDot
+        End With
+    End If
+
+    Profiler_RecordOperation "GanttDiffConstraintShapesDeleted", deletedCount, 0#
+    Profiler_RecordOperation "GanttDiffConstraintOverlayResets", 1, 0#
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Reconstruit uniquement l'overlay Constraints depuis la projection courante.
+' EN: Rebuilds only the Constraints overlay from the current projection.
+'------------------------------------------------------------------------------
+Public Function GanttConstraint_RefreshCurrentOverlay(ByVal ws As Worksheet) As Boolean
+
+    Dim perfScope As clsPerfScope
+    Dim wsWBS As Worksheet
+    Dim tblWBS As ListObject
+    Dim dataArr As Variant
+    Dim mapWBS As Object
+    Dim hasChildren As Object
+    Dim baseById As Object
+    Dim testById As Object
+    Dim constraintById As Object
+    Dim projectStart As Variant
+    Dim projectFinish As Variant
+    Dim totalDays As Long
+    Dim renderMode As String
+    Dim isTestMode As Boolean
+    Dim drawHardConstraints As Boolean
+    Dim drawDeadlines As Boolean
+
+    Set perfScope = Profiler_BeginScope("GanttConstraint_RefreshCurrentOverlay", "Constraint Render")
+    On Error GoTo Failed
+    If ws Is Nothing Then GoTo Failed
+
+    Set wsWBS = ThisWorkbook.Worksheets(WBS_SHEET)
+    Set tblWBS = wsWBS.ListObjects(WBS_TABLE)
+    If tblWBS.DataBodyRange Is Nothing Then GoTo Failed
+
+    Set mapWBS = CanonicalIdentity_BuildColumnMap(tblWBS)
+    ValidateGanttSourceColumns mapWBS
+    dataArr = tblWBS.DataBodyRange.value
+    Set hasChildren = GanttHierarchy_BuildDirectParentPresenceFromWbs(dataArr, mapWBS)
+    Set baseById = GanttLive_BuildBaseByIdMap()
+    Set testById = GanttLive_BuildTestByIdMap()
+    isTestMode = GanttLive_IsTestRenderRequested()
+
+    ResolveDisplayedProjectRange dataArr, mapWBS, hasChildren, baseById, testById, isTestMode, projectStart, projectFinish
+    If Not HasValue(projectStart) Or Not HasValue(projectFinish) Then GoTo Failed
+    If IsAggregatedScaleMode() Then
+        projectStart = GetScaleProjectStart(projectStart)
+        projectFinish = GetScaleProjectFinish(projectFinish)
+    End If
+    totalDays = GetTimelineSlotCount(projectStart, projectFinish)
+    If totalDays < 1 Then GoTo Failed
+
+    renderMode = GanttLive_GetPendingRenderMode()
+    drawHardConstraints = (renderMode <> "SCENARIO")
+    drawDeadlines = (renderMode = "") And IsAnalyticsEnabled()
+    Set constraintById = BuildGanttConstraintMapFromCalc(drawDeadlines)
+
+    GanttConstraint_ClearOverlay ws, UBound(dataArr, 1), totalDays
+    If drawHardConstraints Or drawDeadlines Then
+        DrawConstraintMarkers_Gantt ws, dataArr, mapWBS, hasChildren, projectStart, totalDays, constraintById, drawHardConstraints, drawDeadlines
+    End If
+
+    GanttConstraint_RefreshCurrentOverlay = True
+    Exit Function
+
+Failed:
+    GanttConstraint_RefreshCurrentOverlay = False
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Efface l'overlay courant complet: Shapes CSTR_* et bordures de cellules.
+' EN: Clears the complete current overlay: CSTR_* shapes and cell borders.
+'------------------------------------------------------------------------------
+Public Sub GanttConstraint_ClearCurrentOverlay(ByVal ws As Worksheet)
+
+    Dim lastRow As Long
+    Dim lastCol As Long
+    Dim rowCount As Long
+    Dim totalDays As Long
+
+    If ws Is Nothing Then Exit Sub
+
+    lastRow = GetLastGanttRow(ws)
+    lastCol = ws.cells(HEADER_ROW_2, ws.Columns.Count).End(xlToLeft).Column
+    rowCount = lastRow - FIRST_TASK_ROW + 1
+    totalDays = lastCol - FIRST_TIMELINE_COL + 1
+
+    If rowCount < 0 Then rowCount = 0
+    If totalDays < 0 Then totalDays = 0
+    GanttConstraint_ClearOverlay ws, rowCount, totalDays
 
 End Sub
 '------------------------------------------------------------------------------
@@ -445,10 +594,10 @@ Private Sub DrawConstraintCross_Gantt( _
     ByVal startIndex As Long)
 
     Dim shp As Shape
+    Dim shapeName As String
 
-    Set shp = ws.Shapes.AddShape(msoShapeMathMultiply, centerX - (sizeVal / 2), centerY - (sizeVal / 2), sizeVal, sizeVal)
-    shp.Name = shapeBase & CStr(startIndex)
-    ApplyGanttRenderShapePlacement shp
+    shapeName = shapeBase & CStr(startIndex)
+    Set shp = EnsureConstraintCrossShape_Gantt(ws, shapeName, centerX - (sizeVal / 2), centerY - (sizeVal / 2), sizeVal, sizeVal)
 
     With shp
         .Fill.Visible = msoTrue
@@ -460,3 +609,195 @@ Private Sub DrawConstraintCross_Gantt( _
     shp.ZOrder msoBringToFront
 
 End Sub
+
+'------------------------------------------------------------------------------
+' FR: Reconcilie localement les CSTR_* attendues pour que le FULL retained reste idempotent.
+' EN: Locally reconciles expected CSTR_* shapes so retained FULL remains idempotent.
+'------------------------------------------------------------------------------
+Private Sub BeginConstraintRetainedRender(ByVal ws As Worksheet)
+
+    Dim i As Long
+    Dim shp As Shape
+    Dim shapeName As String
+
+    Set gCstrExistingShapes = CreateObject("Scripting.Dictionary")
+    Set gCstrExpectedNames = CreateObject("Scripting.Dictionary")
+    gCstrAdded = 0
+    gCstrModified = 0
+    gCstrDeleted = 0
+    gCstrSkipped = 0
+    gCstrTypeMismatchRecreated = 0
+
+    If ws Is Nothing Then Exit Sub
+
+    For i = ws.Shapes.Count To 1 Step -1
+        Set shp = ws.Shapes(i)
+        shapeName = CStr(shp.Name)
+        If Left$(shapeName, 5) = "CSTR_" Then
+            If gCstrExistingShapes.Exists(shapeName) Then
+                shp.Delete
+                gCstrDeleted = gCstrDeleted + 1
+            Else
+                Set gCstrExistingShapes(shapeName) = shp
+            End If
+        End If
+    Next i
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Supprime les CSTR_* non attendues apres rendu.
+' EN: Deletes CSTR_* shapes that were not expected in the render pass.
+'------------------------------------------------------------------------------
+Private Sub EndConstraintRetainedRender(ByVal ws As Worksheet)
+
+    Dim key As Variant
+    Dim shp As Shape
+
+    If Not gCstrExistingShapes Is Nothing Then
+        For Each key In gCstrExistingShapes.keys
+            If gCstrExpectedNames Is Nothing Or Not gCstrExpectedNames.Exists(CStr(key)) Then
+                Set shp = Nothing
+                On Error Resume Next
+                Set shp = gCstrExistingShapes(CStr(key))
+                On Error GoTo 0
+                If Not shp Is Nothing Then
+                    shp.Delete
+                    gCstrDeleted = gCstrDeleted + 1
+                End If
+            End If
+        Next key
+    End If
+
+    Profiler_RecordOperation "GanttConstraintShapesAdded", gCstrAdded, 0#
+    Profiler_RecordOperation "GanttConstraintShapesModified", gCstrModified, 0#
+    Profiler_RecordOperation "GanttConstraintShapesDeleted", gCstrDeleted, 0#
+    Profiler_RecordOperation "GanttConstraintShapesSkipped", gCstrSkipped, 0#
+    Profiler_RecordOperation "GanttConstraintTypeMismatchRecreates", gCstrTypeMismatchRecreated, 0#
+
+    Set gCstrExistingShapes = Nothing
+    Set gCstrExpectedNames = Nothing
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Retourne une croix CSTR_* existante ou la cree si necessaire.
+' EN: Returns an existing CSTR_* cross or creates it when necessary.
+'------------------------------------------------------------------------------
+Private Function EnsureConstraintCrossShape_Gantt( _
+    ByVal ws As Worksheet, _
+    ByVal shapeName As String, _
+    ByVal leftVal As Double, _
+    ByVal topVal As Double, _
+    ByVal widthVal As Double, _
+    ByVal heightVal As Double) As Shape
+
+    Dim shp As Shape
+    Dim typeMismatch As Boolean
+    Dim changed As Boolean
+    Dim created As Boolean
+
+    If Not gCstrExpectedNames Is Nothing Then gCstrExpectedNames(shapeName) = True
+
+    If Not gCstrExistingShapes Is Nothing And gCstrExistingShapes.Exists(shapeName) Then
+        Set shp = gCstrExistingShapes(shapeName)
+        typeMismatch = True
+        On Error Resume Next
+        typeMismatch = Not (shp.Type = msoAutoShape And shp.autoShapeType = msoShapeMathMultiply)
+        On Error GoTo 0
+
+        If typeMismatch Then
+            shp.Delete
+            gCstrDeleted = gCstrDeleted + 1
+            gCstrTypeMismatchRecreated = gCstrTypeMismatchRecreated + 1
+            Set shp = Nothing
+        End If
+    End If
+
+    If shp Is Nothing Then
+        Set shp = ws.Shapes.AddShape(msoShapeMathMultiply, leftVal, topVal, widthVal, heightVal)
+        shp.Name = shapeName
+        ApplyGanttRenderShapePlacement shp
+        gCstrAdded = gCstrAdded + 1
+        changed = True
+        created = True
+        If Not gCstrExistingShapes Is Nothing Then Set gCstrExistingShapes(shapeName) = shp
+    Else
+        changed = UpdateConstraintCrossGeometry_Gantt(shp, leftVal, topVal, widthVal, heightVal)
+    End If
+
+    If ApplyConstraintCrossStyle_Gantt(shp) Then changed = True
+    shp.ZOrder msoBringToFront
+
+    If changed Then
+        If Not created Then gCstrModified = gCstrModified + 1
+    Else
+        gCstrSkipped = gCstrSkipped + 1
+    End If
+
+    Set EnsureConstraintCrossShape_Gantt = shp
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Met a jour la geometrie CSTR_* uniquement si elle differe.
+' EN: Updates CSTR_* geometry only when it differs.
+'------------------------------------------------------------------------------
+Private Function UpdateConstraintCrossGeometry_Gantt( _
+    ByVal shp As Shape, _
+    ByVal leftVal As Double, _
+    ByVal topVal As Double, _
+    ByVal widthVal As Double, _
+    ByVal heightVal As Double) As Boolean
+
+    Dim changed As Boolean
+
+    If Abs(shp.Left - leftVal) >= 0.01 Then
+        shp.Left = leftVal
+        changed = True
+    End If
+    If Abs(shp.Top - topVal) >= 0.01 Then
+        shp.Top = topVal
+        changed = True
+    End If
+    If Abs(shp.Width - widthVal) >= 0.01 Then
+        shp.Width = widthVal
+        changed = True
+    End If
+    If Abs(shp.Height - heightVal) >= 0.01 Then
+        shp.Height = heightVal
+        changed = True
+    End If
+
+    UpdateConstraintCrossGeometry_Gantt = changed
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Applique le style CSTR_* seulement lorsque les proprietes divergent.
+' EN: Applies CSTR_* style only when properties differ.
+'------------------------------------------------------------------------------
+Private Function ApplyConstraintCrossStyle_Gantt(ByVal shp As Shape) As Boolean
+
+    Dim changed As Boolean
+
+    If shp.Fill.Visible <> msoTrue Then
+        shp.Fill.Visible = msoTrue
+        changed = True
+    End If
+    If shp.Fill.ForeColor.RGB <> RGB(220, 0, 0) Then
+        shp.Fill.ForeColor.RGB = RGB(220, 0, 0)
+        changed = True
+    End If
+    If Abs(shp.Fill.Transparency - 0#) >= 0.001 Then
+        shp.Fill.Transparency = 0#
+        changed = True
+    End If
+    If shp.Line.Visible <> msoFalse Then
+        shp.Line.Visible = msoFalse
+        changed = True
+    End If
+
+    ApplyConstraintCrossStyle_Gantt = changed
+
+End Function

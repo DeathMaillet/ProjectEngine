@@ -1,6 +1,20 @@
 Attribute VB_Name = "mod_CalcCoreEngine"
 Option Explicit
 
+Private Const CORE_INPUT_CAL As Long = 1
+Private Const CORE_INPUT_BASELINE_START As Long = 2
+Private Const CORE_INPUT_BASELINE_DURATION As Long = 3
+Private Const CORE_INPUT_ACTUAL_START As Long = 4
+Private Const CORE_INPUT_ACTUAL_FINISH As Long = 5
+Private Const CORE_INPUT_FORECAST_START As Long = 6
+Private Const CORE_INPUT_FORECAST_FINISH As Long = 7
+Private Const CORE_INPUT_CONSTRAINT_ACTIVE As Long = 8
+Private Const CORE_INPUT_START_CONSTRAINT_TYPE As Long = 9
+Private Const CORE_INPUT_START_CONSTRAINT_DATE As Long = 10
+Private Const CORE_INPUT_FINISH_CONSTRAINT_TYPE As Long = 11
+Private Const CORE_INPUT_FINISH_CONSTRAINT_DATE As Long = 12
+Private Const CORE_INPUT_TASK_TYPE As Long = 13
+
 '===============================================================================
 ' MODULE : mod_CalcCoreEngine
 ' DOMAINE / DOMAIN : Core Calculation
@@ -54,7 +68,8 @@ Public Sub Run_Calc_Core( _
     Optional ByVal recalcScope As Object, _
     Optional ByVal dependencyDiagnostics As Object, _
     Optional ByVal constraintDiagnostics As Object, _
-    Optional ByVal cascadeDiagnostics As Object)
+    Optional ByVal cascadeDiagnostics As Object, _
+    Optional ByVal executionNetwork As clsCompiledExecutionNetwork)
 
     Dim perfScope As clsPerfScope
 
@@ -77,6 +92,23 @@ Public Sub Run_Calc_Core( _
     Dim rowIdx As Long
     Dim shouldCompute As Boolean
     Dim isPartialMode As Boolean
+    Dim useIndexedCore As Boolean
+    Dim nodeIndex As Long
+    Dim topoPosition As Long
+    Dim nodeIds As Variant
+    Dim rowsByNode As Variant
+    Dim topoNodes As Variant
+    Dim corePredOffsets As Variant
+    Dim corePredNodes As Variant
+    Dim corePredIds As Variant
+    Dim corePredTypes As Variant
+    Dim corePredLags As Variant
+    Dim corePredSummarySourceIds As Variant
+    Dim indexedInputCols As Variant
+    Dim calcStartByNode As Variant
+    Dim calcFinishByNode As Variant
+    Dim hasCalcByNode As Variant
+    Dim blockedByNode As Variant
 
     Set perfScope = Profiler_BeginScope("Run_Calc_Core", "Core Calculation")
 
@@ -109,23 +141,62 @@ Public Sub Run_Calc_Core( _
     Core_RequireColumns mapCol, requiredCols, "Run_Calc_Core"
 
     isPartialMode = Not (recalcScope Is Nothing)
+    useIndexedCore = Not (executionNetwork Is Nothing) And Not isPartialMode
 
-    Set rowById = Core_BuildRowById(dataArr, mapCol)
-    Set parentIds = Core_BuildParentIds(dataArr, mapCol, rowById)
-    Set directChildrenById = Core_BuildDirectChildrenById(dataArr, mapCol, rowById)
-    Set childrenByPred = Core_BuildChildrenByPred(rowById, linksBySuccId)
-
-    Set loeIds = Core_BuildLOEIds(dataArr, mapCol, rowById)
-
-    Set validIds = Core_BuildValidLeafIds(rowById, parentIds)
-    Core_RemoveIdsFromDictionary validIds, loeIds
-
-    Set indegree = Core_BuildIndegree(validIds, linksBySuccId)
-    Set topoOrder = Core_TopoSortLeafNetwork(validIds, childrenByPred, indegree)
+    If executionNetwork Is Nothing Then
+        Set rowById = Core_BuildRowById(dataArr, mapCol)
+        Set parentIds = Core_BuildParentIds(dataArr, mapCol, rowById)
+        Set directChildrenById = Core_BuildDirectChildrenById(dataArr, mapCol, rowById)
+        Set childrenByPred = Core_BuildChildrenByPred(rowById, linksBySuccId)
+        Set loeIds = Core_BuildLOEIds(dataArr, mapCol, rowById)
+        Set validIds = Core_BuildValidLeafIds(rowById, parentIds)
+        Core_RemoveIdsFromDictionary validIds, loeIds
+        Set indegree = Core_BuildIndegree(validIds, linksBySuccId)
+        Set topoOrder = Core_TopoSortLeafNetwork(validIds, childrenByPred, indegree)
+    Else
+        Set rowById = executionNetwork.RowById
+        Set parentIds = executionNetwork.ParentIds
+        Set directChildrenById = executionNetwork.DirectChildrenById
+        Set childrenByPred = executionNetwork.ChildrenByPred
+        Set loeIds = executionNetwork.LoeIds
+        Set validIds = executionNetwork.ValidLeafIds
+        Set topoOrder = executionNetwork.TopoOrder
+    End If
 
     Set calcStartById = CreateObject("Scripting.Dictionary")
     Set calcFinishById = CreateObject("Scripting.Dictionary")
     Set blockingErrors = CreateObject("Scripting.Dictionary")
+
+    If useIndexedCore Then
+        nodeIds = executionNetwork.NodeIds
+        rowsByNode = executionNetwork.RowsByNode
+        topoNodes = executionNetwork.TopoNodes
+        corePredOffsets = executionNetwork.CorePredOffsets
+        corePredNodes = executionNetwork.CorePredNodes
+        corePredIds = executionNetwork.CorePredIds
+        corePredTypes = executionNetwork.CorePredTypes
+        corePredLags = executionNetwork.CorePredLags
+        corePredSummarySourceIds = executionNetwork.CorePredSummarySourceIds
+        ReDim indexedInputCols(1 To CORE_INPUT_TASK_TYPE)
+        indexedInputCols(CORE_INPUT_CAL) = CLng(mapCol("Cal"))
+        indexedInputCols(CORE_INPUT_BASELINE_START) = CLng(mapCol("Baseline Start"))
+        indexedInputCols(CORE_INPUT_BASELINE_DURATION) = CLng(mapCol("Baseline Duration"))
+        indexedInputCols(CORE_INPUT_ACTUAL_START) = CLng(mapCol("Actual Start"))
+        indexedInputCols(CORE_INPUT_ACTUAL_FINISH) = CLng(mapCol("Actual Finish"))
+        indexedInputCols(CORE_INPUT_FORECAST_START) = CLng(mapCol("Forecast Start"))
+        indexedInputCols(CORE_INPUT_FORECAST_FINISH) = CLng(mapCol("Forecast Finish"))
+        indexedInputCols(CORE_INPUT_CONSTRAINT_ACTIVE) = CLng(mapCol("Constraint Active"))
+        indexedInputCols(CORE_INPUT_START_CONSTRAINT_TYPE) = CLng(mapCol("Start Constraint Type"))
+        indexedInputCols(CORE_INPUT_START_CONSTRAINT_DATE) = CLng(mapCol("Start Constraint Date"))
+        indexedInputCols(CORE_INPUT_FINISH_CONSTRAINT_TYPE) = CLng(mapCol("Finish Constraint Type"))
+        indexedInputCols(CORE_INPUT_FINISH_CONSTRAINT_DATE) = CLng(mapCol("Finish Constraint Date"))
+        indexedInputCols(CORE_INPUT_TASK_TYPE) = CLng(mapCol("Task Type"))
+
+        ReDim calcStartByNode(1 To executionNetwork.NodeCount)
+        ReDim calcFinishByNode(1 To executionNetwork.NodeCount)
+        ReDim hasCalcByNode(1 To executionNetwork.NodeCount)
+        ReDim blockedByNode(1 To executionNetwork.NodeCount)
+    End If
 
     If isPartialMode Then
         Core_LoadExistingCalcOutputs dataArr, mapCol, rowById, calcStartById, calcFinishById
@@ -141,25 +212,45 @@ Public Sub Run_Calc_Core( _
         GoTo SafeExit
     End If
 
-    For Each currentId In topoOrder
+    If useIndexedCore Then
+        For topoPosition = LBound(topoNodes) To UBound(topoNodes)
+            nodeIndex = CLng(topoNodes(topoPosition))
+            currentId = CStr(nodeIds(nodeIndex))
 
-        shouldCompute = False
-
-        If isPartialMode Then
-            If recalcScope.Exists(CStr(currentId)) Then
-                shouldCompute = True
-            End If
-        Else
-            shouldCompute = True
-        End If
-
-        If shouldCompute Then
             Core_ComputeOneLeafTask _
                 dataArr, mapCol, CStr(currentId), rowById, linksBySuccId, _
-                calcStartById, calcFinishById, blockingErrors, dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics
-        End If
+                calcStartById, calcFinishById, blockingErrors, dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics, _
+                True, nodeIndex, rowsByNode, corePredOffsets, corePredNodes, corePredIds, corePredTypes, corePredLags, corePredSummarySourceIds, _
+                indexedInputCols, calcStartByNode, calcFinishByNode, hasCalcByNode, blockedByNode
 
-    Next currentId
+            blockedByNode(nodeIndex) = blockingErrors.Exists(CStr(currentId))
+            Profiler_RecordCounter "CoreIndexedLeafCalls", 1
+        Next topoPosition
+
+        Core_MaterializeIndexedResults _
+            nodeIds, calcStartByNode, calcFinishByNode, hasCalcByNode, _
+            calcStartById, calcFinishById
+    Else
+        For Each currentId In topoOrder
+
+            shouldCompute = False
+
+            If isPartialMode Then
+                If recalcScope.Exists(CStr(currentId)) Then
+                    shouldCompute = True
+                End If
+            Else
+                shouldCompute = True
+            End If
+
+            If shouldCompute Then
+                Core_ComputeOneLeafTask _
+                    dataArr, mapCol, CStr(currentId), rowById, linksBySuccId, _
+                    calcStartById, calcFinishById, blockingErrors, dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics
+            End If
+
+        Next currentId
+    End If
 
     Core_ApplyLOEPostProcess dataArr, mapCol, rowById, linksBySuccId, loeIds, _
                              calcStartById, calcFinishById, blockingErrors
@@ -181,6 +272,32 @@ Public Sub Run_Calc_Core( _
     Core_RollupSummaryDates dataArr, mapCol, rowById, directChildrenById, parentIds
 
 SafeExit:
+End Sub
+
+
+'------------------------------------------------------------------------------
+' FR: Materialise une seule fois les buffers indexes pour les post-process historiques.
+' EN: Materializes indexed buffers once for the historical post-process boundaries.
+'------------------------------------------------------------------------------
+Private Sub Core_MaterializeIndexedResults( _
+    ByRef nodeIds As Variant, _
+    ByRef calcStartByNode As Variant, _
+    ByRef calcFinishByNode As Variant, _
+    ByRef hasCalcByNode As Variant, _
+    ByVal calcStartById As Object, _
+    ByVal calcFinishById As Object)
+
+    Dim nodeIndex As Long
+    Dim taskId As String
+
+    For nodeIndex = LBound(nodeIds) To UBound(nodeIds)
+        If hasCalcByNode(nodeIndex) Then
+            taskId = CStr(nodeIds(nodeIndex))
+            calcStartById(taskId) = calcStartByNode(nodeIndex)
+            calcFinishById(taskId) = calcFinishByNode(nodeIndex)
+        End If
+    Next nodeIndex
+
 End Sub
 
 
@@ -281,7 +398,20 @@ Private Sub Core_ComputeOneLeafTask( _
     ByVal blockingErrors As Object, _
     Optional ByVal dependencyDiagnostics As Object, _
     Optional ByVal constraintDiagnostics As Object, _
-    Optional ByVal cascadeDiagnostics As Object)
+    Optional ByVal cascadeDiagnostics As Object, _
+    Optional ByVal useIndexedCore As Boolean = False, _
+    Optional ByVal nodeIndex As Long = 0, _
+    Optional ByRef rowsByNode As Variant, _
+    Optional ByRef corePredOffsets As Variant, _
+    Optional ByRef corePredNodes As Variant, _
+    Optional ByRef corePredIds As Variant, _
+    Optional ByRef corePredTypes As Variant, _
+    Optional ByRef corePredLags As Variant, Optional ByRef corePredSummarySourceIds As Variant, _
+    Optional ByRef indexedInputCols As Variant, _
+    Optional ByRef calcStartByNode As Variant, _
+    Optional ByRef calcFinishByNode As Variant, _
+    Optional ByRef hasCalcByNode As Variant, _
+    Optional ByRef blockedByNode As Variant)
 
     Dim perfScope As clsPerfScope
 
@@ -315,10 +445,15 @@ Private Sub Core_ComputeOneLeafTask( _
     Dim summaryAllowedStart As Variant
     Dim summaryStartBySource As Object
     Dim summaryStartDiagBySource As Object
-    Dim normalAllowedStartDiag As Object
-    Dim summaryAllowedStartDiag As Object
-    Dim predAllowedStartDiag As Object
-    Dim candidateDiag As Object
+    Dim predDiagPredId As String
+    Dim predDiagLinkType As String
+    Dim predDiagLag As Double
+    Dim predDiagCandidateDate As Variant
+    Dim predDiagPredecessorDate As Variant
+    Dim candidatePredecessorDate As Variant
+    Dim predDiagPredecessorDateKind As String
+    Dim predDiagSummarySourceId As String
+    Dim summaryDiagData As Variant
 
     Dim sourceStart As Variant
     Dim sourceFinish As Variant
@@ -327,6 +462,15 @@ Private Sub Core_ComputeOneLeafTask( _
     Dim mustFinishStart As Variant
 
     Dim oneLink As Variant
+    Dim taskLinks As Object
+    Dim linkPosition As Long
+    Dim linkStart As Long
+    Dim linkEnd As Long
+    Dim predNodeIndex As Long
+    Dim predExists As Boolean
+    Dim predBlocked As Boolean
+    Dim predHasStart As Boolean
+    Dim predHasFinish As Boolean
     Dim predId As String
     Dim linkType As String
     Dim lagVal As Double
@@ -339,24 +483,48 @@ Private Sub Core_ComputeOneLeafTask( _
     Dim effectiveDuration As Variant
     Dim taskTypeVal As String
     Dim calType As String
+    Dim leafProfileEnabled As Boolean
+    Dim leafPhaseStart As Double
 
     Set perfScope = Profiler_BeginScope("Core_ComputeOneLeafTask", "Core Leaf")
+    leafProfileEnabled = CoreLeafProfile_IsEnabled()
+    If leafProfileEnabled Then leafPhaseStart = CoreLeafProfile_Timestamp()
 
-    If Not rowById.Exists(taskId) Then Exit Sub
-    rowIdx = CLng(rowById(taskId))
+    If useIndexedCore Then
+        If nodeIndex <= 0 Then Exit Sub
+        rowIdx = CLng(rowsByNode(nodeIndex))
+    Else
+        If Not rowById.Exists(taskId) Then Exit Sub
+        rowIdx = CLng(rowById(taskId))
+    End If
 
-    calType = NormalizeCalendarType(Core_GetVal(dataArr, rowIdx, mapCol, "Cal"))
-    baselineStart = Core_GetVal(dataArr, rowIdx, mapCol, "Baseline Start")
-    baselineDuration = Core_GetVal(dataArr, rowIdx, mapCol, "Baseline Duration")
-    actualStart = Core_GetVal(dataArr, rowIdx, mapCol, "Actual Start")
-    actualFinish = Core_GetVal(dataArr, rowIdx, mapCol, "Actual Finish")
-    forecastStart = Core_GetVal(dataArr, rowIdx, mapCol, "Forecast Start")
-    forecastFinish = Core_GetVal(dataArr, rowIdx, mapCol, "Forecast Finish")
-    constraintActive = UCase$(Trim$(CStr(Core_GetVal(dataArr, rowIdx, mapCol, "Constraint Active"))))
-    startConstraintType = Trim$(CStr(Core_GetVal(dataArr, rowIdx, mapCol, "Start Constraint Type")))
-    startConstraintDate = Core_GetVal(dataArr, rowIdx, mapCol, "Start Constraint Date")
-    finishConstraintType = Trim$(CStr(Core_GetVal(dataArr, rowIdx, mapCol, "Finish Constraint Type")))
-    finishConstraintDate = Core_GetVal(dataArr, rowIdx, mapCol, "Finish Constraint Date")
+    If useIndexedCore Then
+        calType = NormalizeCalendarType(dataArr(rowIdx, indexedInputCols(CORE_INPUT_CAL)))
+        baselineStart = dataArr(rowIdx, indexedInputCols(CORE_INPUT_BASELINE_START))
+        baselineDuration = dataArr(rowIdx, indexedInputCols(CORE_INPUT_BASELINE_DURATION))
+        actualStart = dataArr(rowIdx, indexedInputCols(CORE_INPUT_ACTUAL_START))
+        actualFinish = dataArr(rowIdx, indexedInputCols(CORE_INPUT_ACTUAL_FINISH))
+        forecastStart = dataArr(rowIdx, indexedInputCols(CORE_INPUT_FORECAST_START))
+        forecastFinish = dataArr(rowIdx, indexedInputCols(CORE_INPUT_FORECAST_FINISH))
+        constraintActive = UCase$(Trim$(CStr(dataArr(rowIdx, indexedInputCols(CORE_INPUT_CONSTRAINT_ACTIVE)))))
+        startConstraintType = Trim$(CStr(dataArr(rowIdx, indexedInputCols(CORE_INPUT_START_CONSTRAINT_TYPE))))
+        startConstraintDate = dataArr(rowIdx, indexedInputCols(CORE_INPUT_START_CONSTRAINT_DATE))
+        finishConstraintType = Trim$(CStr(dataArr(rowIdx, indexedInputCols(CORE_INPUT_FINISH_CONSTRAINT_TYPE))))
+        finishConstraintDate = dataArr(rowIdx, indexedInputCols(CORE_INPUT_FINISH_CONSTRAINT_DATE))
+    Else
+        calType = NormalizeCalendarType(Core_GetVal(dataArr, rowIdx, mapCol, "Cal"))
+        baselineStart = Core_GetVal(dataArr, rowIdx, mapCol, "Baseline Start")
+        baselineDuration = Core_GetVal(dataArr, rowIdx, mapCol, "Baseline Duration")
+        actualStart = Core_GetVal(dataArr, rowIdx, mapCol, "Actual Start")
+        actualFinish = Core_GetVal(dataArr, rowIdx, mapCol, "Actual Finish")
+        forecastStart = Core_GetVal(dataArr, rowIdx, mapCol, "Forecast Start")
+        forecastFinish = Core_GetVal(dataArr, rowIdx, mapCol, "Forecast Finish")
+        constraintActive = UCase$(Trim$(CStr(Core_GetVal(dataArr, rowIdx, mapCol, "Constraint Active"))))
+        startConstraintType = Trim$(CStr(Core_GetVal(dataArr, rowIdx, mapCol, "Start Constraint Type")))
+        startConstraintDate = Core_GetVal(dataArr, rowIdx, mapCol, "Start Constraint Date")
+        finishConstraintType = Trim$(CStr(Core_GetVal(dataArr, rowIdx, mapCol, "Finish Constraint Type")))
+        finishConstraintDate = Core_GetVal(dataArr, rowIdx, mapCol, "Finish Constraint Date")
+    End If
 
     effectiveDuration = baselineDuration
 
@@ -364,11 +532,28 @@ Private Sub Core_ComputeOneLeafTask( _
     'A milestone without explicit duration is treated as 1 day by the core.
     'This is a calculation default only; it does not write 1 back to WBS/CALC input fields.
     If Not HasValue(effectiveDuration) Then
-        taskTypeVal = Core_NormalizeTaskType(Core_GetVal(dataArr, rowIdx, mapCol, "Task Type"))
+        If useIndexedCore Then
+            taskTypeVal = Core_NormalizeTaskType(dataArr(rowIdx, indexedInputCols(CORE_INPUT_TASK_TYPE)))
+        Else
+            taskTypeVal = Core_NormalizeTaskType(Core_GetVal(dataArr, rowIdx, mapCol, "Task Type"))
+        End If
 
         If taskTypeVal = "MILESTONE" Then
             effectiveDuration = 1
         End If
+    End If
+
+    If leafProfileEnabled Then
+        CoreLeafProfile_Count "LeavesProcessed"
+        CoreLeafProfile_Count "DataArrayReads", 12
+        If useIndexedCore Then
+            CoreLeafProfile_Count "IndexedColumnReads", 12
+        Else
+            CoreLeafProfile_Count "ColumnMapExists", 12
+            CoreLeafProfile_Count "ColumnMapItems", 12
+        End If
+        CoreLeafProfile_AddPhase "TaskPreparation", leafPhaseStart
+        leafPhaseStart = CoreLeafProfile_Timestamp()
     End If
 
     predAllowedStart = Empty
@@ -385,107 +570,207 @@ Private Sub Core_ComputeOneLeafTask( _
 
     normalAllowedStart = Empty
     summaryAllowedStart = Empty
-    Set summaryStartBySource = CreateObject("Scripting.Dictionary")
-    Set summaryStartDiagBySource = CreateObject("Scripting.Dictionary")
 
-    If Not linksBySuccId Is Nothing Then
+    linkStart = 1
+    linkEnd = 0
+    If useIndexedCore Then
+        linkStart = CLng(corePredOffsets(nodeIndex))
+        linkEnd = CLng(corePredOffsets(nodeIndex + 1)) - 1
+    ElseIf Not linksBySuccId Is Nothing Then
         If linksBySuccId.Exists(taskId) Then
-            For Each oneLink In linksBySuccId(taskId)
-
-                predId = Core_GetLinkPredId(oneLink)
-                linkType = Core_GetLinkType(oneLink)
-                lagVal = Core_GetLinkLag(oneLink)
-                summarySourceId = Core_GetLinkSummarySourceId(oneLink)
-
-                If predId = "" Then
-                    Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
-                        "Missing predecessor"
-                    Exit Sub
-                End If
-
-                If Not rowById.Exists(predId) Then
-                    Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
-                        "Missing predecessor: ID " & predId
-                    Exit Sub
-                End If
-
-                If blockingErrors.Exists(predId) Then
-                    Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
-                        "Blocked by predecessor error: ID " & predId
-                    Exit Sub
-                End If
-
-                Select Case linkType
-
-                    Case "SS"
-                        If calcStartById.Exists(predId) Then
-                            candidateStart = ApplyLag(calcStartById(predId), lagVal, calType, "SS")
-
-                            Set candidateDiag = Core_CreateStartDependencyDiagnostic( _
-                                taskId, predId, linkType, lagVal, candidateStart, calcStartById(predId), "START", summarySourceId)
-
-                            If summarySourceId <> "" Then
-                                If summaryStartBySource.Exists(summarySourceId) Then
-                                    If CDbl(candidateStart) < CDbl(summaryStartBySource(summarySourceId)) Then
-                                        summaryStartBySource(summarySourceId) = candidateStart
-                                        Set summaryStartDiagBySource(summarySourceId) = candidateDiag
-                                    End If
-                                Else
-                                    summaryStartBySource(summarySourceId) = candidateStart
-                                    Set summaryStartDiagBySource(summarySourceId) = candidateDiag
-                                End If
-                            Else
-                                If Not HasValue(normalAllowedStart) Or CDbl(candidateStart) > CDbl(normalAllowedStart) Then
-                                    Set normalAllowedStartDiag = candidateDiag
-                                End If
-                                normalAllowedStart = Core_MaxDateIfBoth(normalAllowedStart, candidateStart)
-                            End If
-                        End If
-
-                    Case "FF"
-                        If calcFinishById.Exists(predId) Then
-                            candidateFinish = ApplyLag(calcFinishById(predId), lagVal, calType, "FF")
-                            predAllowedFinish = Core_MaxDateIfBoth(predAllowedFinish, candidateFinish)
-                        End If
-
-                    Case "FS", ""
-                        If calcFinishById.Exists(predId) Then
-                            candidateStart = ApplyLag(calcFinishById(predId), lagVal, calType, "FS")
-                            Set candidateDiag = Core_CreateStartDependencyDiagnostic( _
-                                taskId, predId, IIf(linkType = "", "FS", linkType), lagVal, candidateStart, calcFinishById(predId), "FINISH", summarySourceId)
-                            If Not HasValue(normalAllowedStart) Or CDbl(candidateStart) > CDbl(normalAllowedStart) Then
-                                Set normalAllowedStartDiag = candidateDiag
-                            End If
-                            normalAllowedStart = Core_MaxDateIfBoth(normalAllowedStart, candidateStart)
-                        End If
-
-                    Case Else
-                        Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
-                            "Unsupported link type: " & linkType
-                        Exit Sub
-
-                End Select
-
-            Next oneLink
+            Set taskLinks = linksBySuccId(taskId)
+            linkEnd = taskLinks.Count
         End If
     End If
 
-    For Each parentKey In summaryStartBySource.Keys
-        If Not HasValue(summaryAllowedStart) Or CDbl(summaryStartBySource(CStr(parentKey))) > CDbl(summaryAllowedStart) Then
-            If summaryStartDiagBySource.Exists(CStr(parentKey)) Then
-                Set summaryAllowedStartDiag = summaryStartDiagBySource(CStr(parentKey))
+    For linkPosition = linkStart To linkEnd
+        If leafProfileEnabled Then CoreLeafProfile_Count "PredecessorsEvaluated"
+        If useIndexedCore Then
+            predNodeIndex = CLng(corePredNodes(linkPosition))
+            predId = CStr(corePredIds(linkPosition))
+            linkType = CStr(corePredTypes(linkPosition))
+            lagVal = CDbl(corePredLags(linkPosition))
+            summarySourceId = CStr(corePredSummarySourceIds(linkPosition))
+        Else
+            If IsObject(taskLinks.Item(linkPosition)) Then
+                Set oneLink = taskLinks.Item(linkPosition)
+            Else
+                oneLink = taskLinks.Item(linkPosition)
+            End If
+            predNodeIndex = 0
+            predId = Core_GetLinkPredId(oneLink)
+            linkType = Core_GetLinkType(oneLink)
+            lagVal = Core_GetLinkLag(oneLink)
+            summarySourceId = Core_GetLinkSummarySourceId(oneLink)
+        End If
+
+        If predId = "" Then
+            Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
+                "Missing predecessor"
+            Exit Sub
+        End If
+
+        predExists = False
+        predBlocked = False
+        predHasStart = False
+        predHasFinish = False
+        If useIndexedCore Then
+            predExists = (predNodeIndex > 0)
+            If predExists Then
+                predBlocked = CBool(blockedByNode(predNodeIndex))
+                predHasStart = CBool(hasCalcByNode(predNodeIndex))
+                predHasFinish = predHasStart
+            End If
+        Else
+            predExists = rowById.Exists(predId)
+            If predExists Then
+                predBlocked = blockingErrors.Exists(predId)
+                predHasStart = calcStartById.Exists(predId)
+                predHasFinish = calcFinishById.Exists(predId)
             End If
         End If
-        summaryAllowedStart = Core_MaxDateIfBoth(summaryAllowedStart, summaryStartBySource(CStr(parentKey)))
-    Next parentKey
+
+        If Not predExists Then
+            Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
+                "Missing predecessor: ID " & predId
+            Exit Sub
+        End If
+
+        If predBlocked Then
+            Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
+                "Blocked by predecessor error: ID " & predId
+            Exit Sub
+        End If
+
+        Select Case linkType
+
+            Case "SS"
+                If leafProfileEnabled Then CoreLeafProfile_Count "LinksSS"
+                If predHasStart Then
+                    If useIndexedCore Then
+                        candidateStart = ApplyLag(calcStartByNode(predNodeIndex), lagVal, calType, "SS")
+                        candidatePredecessorDate = calcStartByNode(predNodeIndex)
+                    Else
+                        candidateStart = ApplyLag(calcStartById(predId), lagVal, calType, "SS")
+                        candidatePredecessorDate = calcStartById(predId)
+                    End If
+
+                    If summarySourceId <> "" Then
+                        If summaryStartBySource Is Nothing Then
+                            Set summaryStartBySource = CreateObject("Scripting.Dictionary")
+                            Set summaryStartDiagBySource = CreateObject("Scripting.Dictionary")
+                        End If
+                        If summaryStartBySource.Exists(summarySourceId) Then
+                            If CDbl(candidateStart) < CDbl(summaryStartBySource(summarySourceId)) Then
+                                summaryStartBySource(summarySourceId) = candidateStart
+                                summaryStartDiagBySource(summarySourceId) = Array( _
+                                    predId, linkType, lagVal, candidateStart, _
+                                    candidatePredecessorDate, _
+                                    "START", summarySourceId)
+                            End If
+                        Else
+                            summaryStartBySource(summarySourceId) = candidateStart
+                            summaryStartDiagBySource(summarySourceId) = Array( _
+                                predId, linkType, lagVal, candidateStart, _
+                                candidatePredecessorDate, _
+                                "START", summarySourceId)
+                        End If
+                    Else
+                        If Not HasValue(normalAllowedStart) Or CDbl(candidateStart) > CDbl(normalAllowedStart) Then
+                            predDiagPredId = predId
+                            predDiagLinkType = linkType
+                            predDiagLag = lagVal
+                            predDiagCandidateDate = candidateStart
+                            predDiagPredecessorDate = candidatePredecessorDate
+                            predDiagPredecessorDateKind = "START"
+                            predDiagSummarySourceId = summarySourceId
+                        End If
+                        normalAllowedStart = Core_MaxDateIfBoth(normalAllowedStart, candidateStart)
+                    End If
+                End If
+
+            Case "FF"
+                If leafProfileEnabled Then CoreLeafProfile_Count "LinksFF"
+                If predHasFinish Then
+                    If useIndexedCore Then
+                        candidateFinish = ApplyLag(calcFinishByNode(predNodeIndex), lagVal, calType, "FF")
+                    Else
+                        candidateFinish = ApplyLag(calcFinishById(predId), lagVal, calType, "FF")
+                    End If
+                    predAllowedFinish = Core_MaxDateIfBoth(predAllowedFinish, candidateFinish)
+                End If
+
+            Case "FS", ""
+                If leafProfileEnabled Then CoreLeafProfile_Count "LinksFS"
+                If predHasFinish Then
+                    If useIndexedCore Then
+                        candidateStart = ApplyLag(calcFinishByNode(predNodeIndex), lagVal, calType, "FS")
+                    Else
+                        candidateStart = ApplyLag(calcFinishById(predId), lagVal, calType, "FS")
+                    End If
+                    If Not HasValue(normalAllowedStart) Or CDbl(candidateStart) > CDbl(normalAllowedStart) Then
+                        predDiagPredId = predId
+                        predDiagLinkType = IIf(linkType = "", "FS", linkType)
+                        predDiagLag = lagVal
+                        predDiagCandidateDate = candidateStart
+                        If useIndexedCore Then
+                            predDiagPredecessorDate = calcFinishByNode(predNodeIndex)
+                        Else
+                            predDiagPredecessorDate = calcFinishById(predId)
+                        End If
+                        predDiagPredecessorDateKind = "FINISH"
+                        predDiagSummarySourceId = summarySourceId
+                    End If
+                    normalAllowedStart = Core_MaxDateIfBoth(normalAllowedStart, candidateStart)
+                End If
+
+            Case Else
+                Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
+                    "Unsupported link type: " & linkType
+                Exit Sub
+
+        End Select
+
+        If leafProfileEnabled Then
+            If lagVal < 0# Then
+                CoreLeafProfile_Count "LagsNegative"
+            ElseIf lagVal > 0# Then
+                CoreLeafProfile_Count "LagsPositive"
+            Else
+                CoreLeafProfile_Count "LagsZero"
+            End If
+        End If
+    Next linkPosition
+
+    If Not summaryStartBySource Is Nothing Then
+        For Each parentKey In summaryStartBySource.Keys
+            If Not HasValue(summaryAllowedStart) Or CDbl(summaryStartBySource(CStr(parentKey))) > CDbl(summaryAllowedStart) Then
+                If summaryStartDiagBySource.Exists(CStr(parentKey)) Then
+                    summaryDiagData = summaryStartDiagBySource(CStr(parentKey))
+                End If
+            End If
+            summaryAllowedStart = Core_MaxDateIfBoth(summaryAllowedStart, summaryStartBySource(CStr(parentKey)))
+        Next parentKey
+    End If
 
     predAllowedStart = Core_MaxDateIfBoth(normalAllowedStart, summaryAllowedStart)
     If HasValue(predAllowedStart) Then
         If HasValue(summaryAllowedStart) And CDbl(predAllowedStart) = CDbl(summaryAllowedStart) Then
-            Set predAllowedStartDiag = summaryAllowedStartDiag
-        Else
-            Set predAllowedStartDiag = normalAllowedStartDiag
+            If IsArray(summaryDiagData) Then
+                predDiagPredId = CStr(summaryDiagData(0))
+                predDiagLinkType = CStr(summaryDiagData(1))
+                predDiagLag = CDbl(summaryDiagData(2))
+                predDiagCandidateDate = summaryDiagData(3)
+                predDiagPredecessorDate = summaryDiagData(4)
+                predDiagPredecessorDateKind = CStr(summaryDiagData(5))
+                predDiagSummarySourceId = CStr(summaryDiagData(6))
+            End If
         End If
+    End If
+
+    If leafProfileEnabled Then
+        CoreLeafProfile_AddPhase "PredecessorEvaluation", leafPhaseStart
+        leafPhaseStart = CoreLeafProfile_Timestamp()
     End If
 
     If constraintActive = "YES" Then
@@ -600,7 +885,9 @@ Private Sub Core_ComputeOneLeafTask( _
 
     If HasValue(forecastStart) And HasValue(predAllowedStart) Then
         If CDbl(forecastStart) < CDbl(predAllowedStart) Then
-            Core_RecordForecastStartDependencyDiagnostic dependencyDiagnostics, taskId, forecastStart, predAllowedStart, predAllowedStartDiag
+            Core_RecordForecastStartDependencyDiagnostic dependencyDiagnostics, taskId, forecastStart, predAllowedStart, _
+                predDiagPredId, predDiagLinkType, predDiagLag, predDiagCandidateDate, _
+                predDiagPredecessorDate, predDiagPredecessorDateKind, predDiagSummarySourceId
             Core_AddBlockingError dataArr, rowIdx, mapCol, blockingErrors, taskId, _
                 "Forecast Start violates dependencies"
             Exit Sub
@@ -747,7 +1034,31 @@ Private Sub Core_ComputeOneLeafTask( _
         End If
     End If
 
-    sourceStart = Core_GetSourceStart(dataArr, rowIdx, mapCol)
+    If leafProfileEnabled Then
+        CoreLeafProfile_AddPhase "ConstraintEvaluation", leafPhaseStart
+        leafPhaseStart = CoreLeafProfile_Timestamp()
+    End If
+
+    If HasValue(actualStart) Then
+        sourceStart = actualStart
+    ElseIf HasValue(forecastStart) Then
+        sourceStart = forecastStart
+    ElseIf HasValue(baselineStart) Then
+        sourceStart = baselineStart
+    Else
+        sourceStart = Empty
+    End If
+    If leafProfileEnabled Then
+        If HasValue(actualStart) Or HasValue(actualFinish) Then
+            CoreLeafProfile_Count "PolicyActual"
+        ElseIf HasValue(forecastStart) Or HasValue(forecastFinish) Then
+            CoreLeafProfile_Count "PolicyForecast"
+        ElseIf HasValue(baselineStart) Then
+            CoreLeafProfile_Count "PolicyBaseline"
+        Else
+            CoreLeafProfile_Count "PolicyDependenciesOnly"
+        End If
+    End If
 
     If HasValue(constraintMustFinish) Then
         calcStart = mustFinishStart
@@ -793,7 +1104,13 @@ Private Sub Core_ComputeOneLeafTask( _
         End If
     End If
 
-    sourceFinish = Core_GetSourceFinish(dataArr, rowIdx, mapCol)
+    If HasValue(actualFinish) Then
+        sourceFinish = actualFinish
+    ElseIf HasValue(forecastFinish) Then
+        sourceFinish = forecastFinish
+    Else
+        sourceFinish = Empty
+    End If
 
     If HasValue(constraintMustFinish) Then
         calcFinish = constraintMustFinish
@@ -851,8 +1168,21 @@ Private Sub Core_ComputeOneLeafTask( _
         Exit Sub
     End If
 
-    calcStartById(taskId) = calcStart
-    calcFinishById(taskId) = calcFinish
+    If leafProfileEnabled Then
+        CoreLeafProfile_AddPhase "DatePolicyAndFinalization", leafPhaseStart
+        leafPhaseStart = CoreLeafProfile_Timestamp()
+    End If
+
+    If useIndexedCore Then
+        calcStartByNode(nodeIndex) = calcStart
+        calcFinishByNode(nodeIndex) = calcFinish
+        hasCalcByNode(nodeIndex) = True
+    Else
+        calcStartById(taskId) = calcStart
+        calcFinishById(taskId) = calcFinish
+    End If
+
+    If leafProfileEnabled Then CoreLeafProfile_AddPhase "ResultBuffers", leafPhaseStart
 
 End Sub
 
@@ -1415,32 +1745,7 @@ End Function
 ' Notes:
 ' - Ce diagnostic est la base des messages dependency et des cascades aval.
 '------------------------------------------------------------------------------
-Private Function Core_CreateStartDependencyDiagnostic( _
-    ByVal taskId As String, _
-    ByVal predId As String, _
-    ByVal linkType As String, _
-    ByVal lagVal As Double, _
-    ByVal candidateStart As Variant, _
-    ByVal predecessorDate As Variant, _
-    ByVal predecessorDateKind As String, _
-    Optional ByVal summarySourceId As String = "") As Object
 
-    Dim diag As Object
-
-    Set diag = CreateObject("Scripting.Dictionary")
-
-    diag("TaskID") = CStr(taskId)
-    diag("BlockingPredecessorID") = CStr(predId)
-    diag("BlockingLinkType") = UCase$(Trim$(linkType))
-    diag("BlockingLag") = CDbl(lagVal)
-    diag("BlockingCandidateDate") = candidateStart
-    diag("BlockingPredecessorDate") = predecessorDate
-    diag("BlockingPredecessorDateKind") = UCase$(Trim$(predecessorDateKind))
-    diag("ExpandedFrom") = CStr(summarySourceId)
-
-    Set Core_CreateStartDependencyDiagnostic = diag
-
-End Function
 
 
 '------------------------------------------------------------------------------
@@ -1470,26 +1775,32 @@ Private Sub Core_RecordForecastStartDependencyDiagnostic( _
     ByVal taskId As String, _
     ByVal requestedStart As Variant, _
     ByVal minimumAllowedStart As Variant, _
-    ByVal sourceDiagnostic As Object)
+    ByVal blockingPredecessorId As String, _
+    ByVal blockingLinkType As String, _
+    ByVal blockingLag As Double, _
+    ByVal blockingCandidateDate As Variant, _
+    ByVal blockingPredecessorDate As Variant, _
+    ByVal blockingPredecessorDateKind As String, _
+    ByVal expandedFrom As String)
 
     Dim diag As Object
 
     If dependencyDiagnostics Is Nothing Then Exit Sub
-    If sourceDiagnostic Is Nothing Then Exit Sub
+    If blockingPredecessorId = "" Then Exit Sub
 
     Set diag = CreateObject("Scripting.Dictionary")
+    If CoreLeafProfile_IsEnabled() Then CoreLeafProfile_Count "DependencyDiagnosticDictionaries"
 
     diag("TaskID") = CStr(taskId)
     diag("RequestedStart") = requestedStart
     diag("MinimumAllowedStart") = minimumAllowedStart
-
-    If sourceDiagnostic.Exists("BlockingPredecessorID") Then diag("BlockingPredecessorID") = sourceDiagnostic("BlockingPredecessorID")
-    If sourceDiagnostic.Exists("BlockingLinkType") Then diag("BlockingLinkType") = sourceDiagnostic("BlockingLinkType")
-    If sourceDiagnostic.Exists("BlockingLag") Then diag("BlockingLag") = sourceDiagnostic("BlockingLag")
-    If sourceDiagnostic.Exists("BlockingCandidateDate") Then diag("BlockingCandidateDate") = sourceDiagnostic("BlockingCandidateDate")
-    If sourceDiagnostic.Exists("BlockingPredecessorDate") Then diag("BlockingPredecessorDate") = sourceDiagnostic("BlockingPredecessorDate")
-    If sourceDiagnostic.Exists("BlockingPredecessorDateKind") Then diag("BlockingPredecessorDateKind") = sourceDiagnostic("BlockingPredecessorDateKind")
-    If sourceDiagnostic.Exists("ExpandedFrom") Then diag("ExpandedFrom") = sourceDiagnostic("ExpandedFrom")
+    diag("BlockingPredecessorID") = blockingPredecessorId
+    diag("BlockingLinkType") = UCase$(Trim$(blockingLinkType))
+    diag("BlockingLag") = blockingLag
+    diag("BlockingCandidateDate") = blockingCandidateDate
+    diag("BlockingPredecessorDate") = blockingPredecessorDate
+    diag("BlockingPredecessorDateKind") = UCase$(Trim$(blockingPredecessorDateKind))
+    diag("ExpandedFrom") = expandedFrom
 
     Set dependencyDiagnostics.Item(CStr(taskId)) = diag
 

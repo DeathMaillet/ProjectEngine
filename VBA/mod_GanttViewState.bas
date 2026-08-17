@@ -327,16 +327,25 @@ End Function
 '------------------------------------------------------------------------------
 Public Sub SetGanttTimelineScaleMode(ByVal scaleMode As String)
 
+    Dim oldScaleMode As String
+    Dim nextScaleMode As String
+
     EnsureGanttViewInitialized
+    oldScaleMode = gTimelineScaleMode
 
     Select Case UCase$(Trim$(scaleMode))
         Case GANTT_SCALE_MONTH
-            gTimelineScaleMode = GANTT_SCALE_MONTH
+            nextScaleMode = GANTT_SCALE_MONTH
         Case GANTT_SCALE_WEEK
-            gTimelineScaleMode = GANTT_SCALE_WEEK
+            nextScaleMode = GANTT_SCALE_WEEK
         Case Else
-            gTimelineScaleMode = GANTT_SCALE_DAY
+            nextScaleMode = GANTT_SCALE_DAY
     End Select
+
+    gTimelineScaleMode = nextScaleMode
+    If oldScaleMode <> gTimelineScaleMode Then
+        GanttDependency_InvalidateLocalIndex "TimelineScaleChanged"
+    End If
 
 End Sub
 
@@ -402,6 +411,7 @@ End Sub
 Public Sub Toggle_Gantt_CriticalPath()
 
     EnsureGanttViewInitialized
+    GanttLocal_PrimeNormalState
 
     Select Case gAnalyticsPathMode
         Case GANTT_ANALYTICS_PATH_NONE
@@ -412,7 +422,7 @@ Public Sub Toggle_Gantt_CriticalPath()
             gAnalyticsPathMode = GANTT_ANALYTICS_PATH_NONE
     End Select
 
-    Refresh_Gantt_UI_Only
+    GanttRefresh_ApplyAnalyticsStyleOnly
 
 End Sub
 
@@ -422,9 +432,21 @@ End Sub
 '------------------------------------------------------------------------------
 Public Sub Toggle_Gantt_Constraints()
 
+    Dim ws As Worksheet
+
     EnsureGanttViewInitialized
     gShowConstraints = Not gShowConstraints
-    Refresh_Gantt_UI_Only
+    Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
+
+    GanttUiControls_RefreshConstraintVisual ws
+    If gShowConstraints Then
+        If Not GanttConstraint_RefreshCurrentOverlay(ws) Then
+            Err.Raise 5, "Toggle_Gantt_Constraints", "Constraint overlay refresh failed."
+        End If
+    Else
+        GanttConstraint_ClearCurrentOverlay ws
+    End If
+    GanttUiControls_RefreshConstraintVisual ws
 
 End Sub
 
@@ -434,16 +456,20 @@ End Sub
 '------------------------------------------------------------------------------
 Public Sub Toggle_Gantt_Scale()
 
+    Dim nextScaleMode As String
+
     EnsureGanttViewInitialized
 
     Select Case gTimelineScaleMode
         Case GANTT_SCALE_DAY
-            gTimelineScaleMode = GANTT_SCALE_WEEK
+            nextScaleMode = GANTT_SCALE_WEEK
         Case GANTT_SCALE_WEEK
-            gTimelineScaleMode = GANTT_SCALE_MONTH
+            nextScaleMode = GANTT_SCALE_MONTH
         Case Else
-            gTimelineScaleMode = GANTT_SCALE_DAY
+            nextScaleMode = GANTT_SCALE_DAY
     End Select
+
+    SetGanttTimelineScaleMode nextScaleMode
 
     Refresh_Gantt_AfterScaleChange
     GanttDrag_ReconcileWatchState
@@ -567,7 +593,9 @@ End Sub
 ' EN: Refreshes Apply Current Gantt View without changing the business rules that produce the data.
 '------------------------------------------------------------------------------
 
-Private Sub ApplyCurrentGanttView(ByVal ws As Worksheet)
+Private Sub ApplyCurrentGanttView( _
+    ByVal ws As Worksheet, _
+    Optional ByVal freshFullRender As Boolean = False)
 
     Dim perfScope As clsPerfScope
 
@@ -588,12 +616,21 @@ Private Sub ApplyCurrentGanttView(ByVal ws As Worksheet)
     lastRow = GetLastRenderedGanttRow(ws)
     If lastRow < FIRST_TASK_ROW Then GoTo SafeExit
 
-    Set shapeIndex = BuildGanttShapeIndex(ws)
-
     If GetGanttViewMode() = GANTT_VIEW_DETAIL Then
 
         For r = FIRST_TASK_ROW To lastRow
             If ws.rows(r).Hidden Then ws.rows(r).Hidden = False
+        Next r
+
+        If freshFullRender And Not IsAggregatedScaleMode() Then
+            GanttDependencySvg_SetVisible ws, True
+            ReconcileGanttViewRowsAfterFiltering ws, lastRow
+            Profiler_RecordOperation "GanttFullFreshVisibilityFastPath", 1, 0#
+            GoTo SafeExit
+        End If
+
+        Set shapeIndex = BuildGanttShapeIndex(ws)
+        For r = FIRST_TASK_ROW To lastRow
             SetRowRenderedShapesVisibility ws, r, True, shapeIndex
         Next r
 
@@ -606,11 +643,13 @@ Private Sub ApplyCurrentGanttView(ByVal ws As Worksheet)
                 End If
             End If
         Next shp
+        GanttDependencySvg_SetVisible ws, Not IsAggregatedScaleMode()
 
         ReconcileGanttViewRowsAfterFiltering ws, lastRow
         GoTo SafeExit
     End If
 
+    Set shapeIndex = BuildGanttShapeIndex(ws)
     For r = FIRST_TASK_ROW To lastRow
         showRow = ShouldShowGanttRow(ws, r)
         ws.rows(r).Hidden = Not showRow
@@ -625,6 +664,7 @@ Private Sub ApplyCurrentGanttView(ByVal ws As Worksheet)
             shp.Visible = msoFalse
         End If
     Next shp
+    GanttDependencySvg_SetVisible ws, False
 
     ReconcileGanttViewRowsAfterFiltering ws, lastRow
 
@@ -717,7 +757,8 @@ End Function
 
 Public Sub ApplyGanttUiState( _
     ByVal ws As Worksheet, _
-    Optional ByVal rebuildHeaderControls As Boolean = True)
+    Optional ByVal rebuildHeaderControls As Boolean = True, _
+    Optional ByVal freshFullRender As Boolean = False)
 
     Dim perfScope As clsPerfScope
 
@@ -727,7 +768,7 @@ Public Sub ApplyGanttUiState( _
     'paths now share the same differential post-condition for header controls.
     GanttUiControls_EnsureCanonical ws
 
-    ApplyCurrentGanttView ws
+    If rebuildHeaderControls Then ApplyCurrentGanttView ws, freshFullRender
 
 End Sub
 '------------------------------------------------------------------------------
@@ -742,7 +783,7 @@ Private Sub Refresh_Gantt_AfterScaleChange()
 
     oldPreserve = GetGanttPreserveTestInputs()
     SetGanttPreserveTestInputs True
-    Refresh_Gantt False, True
+    CommitGanttUpdate GanttEngine_ActiveDataSource(), GANTT_UPDATE_SCOPE_FULL, GANTT_RENDER_INTENT_SHOW, "Refresh_Gantt_AfterScaleChange"
 
 SafeExit:
     SetGanttPreserveTestInputs oldPreserve
@@ -762,7 +803,7 @@ Private Sub Refresh_Gantt_UI_Only()
     oldPreserve = GetGanttPreserveTestInputs()
 
     SetGanttPreserveTestInputs True
-    Refresh_Gantt_DisplayOnly
+    CommitGanttUpdate GanttEngine_ActiveDataSource(), GANTT_UPDATE_SCOPE_INCREMENTAL, GANTT_RENDER_INTENT_OFFSCREEN, "Refresh_Gantt_UI_Only"
 
 SafeExit:
     SetGanttPreserveTestInputs oldPreserve

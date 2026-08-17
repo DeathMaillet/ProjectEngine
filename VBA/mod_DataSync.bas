@@ -43,16 +43,17 @@ Sub Sync_WBS_To_CALC(Optional ByVal preserveCalcOutputs As Boolean = False)
     Dim mapCalc As Object
     Dim mapWBS As Object
     Dim wbsIdRows As Object
-    Dim wbsToId As Object
     Dim summaryWbsByWbs As Object
 
     Dim colsToCopy As Variant
     Dim colsToClear As Variant
+    Dim wbsData As Variant
+    Dim inputColumns As Object
+    Dim missingIdRows As Object
 
     Dim i As Long
     Dim r As Long
     Dim maxId As Long
-    Dim currentCalcRows As Long
     Dim targetRows As Long
 
     Dim idValue As Variant
@@ -60,12 +61,20 @@ Sub Sync_WBS_To_CALC(Optional ByVal preserveCalcOutputs As Boolean = False)
     Dim wbsValue As String
     Dim wbsRowIndex As Long
 
-    Dim predWbs As String
-    Dim predRaw As String
-    Dim taskTypeVal As String
-    Dim calVal As String
-
     Dim consoleMessages As Collection
+    Dim previousCalculation As XlCalculation
+    Dim previousScreenUpdating As Boolean
+    Dim previousEnableEvents As Boolean
+    Dim previousStatusBar As Variant
+    Dim applicationStateCaptured As Boolean
+    Dim errorNumber As Long
+    Dim errorDescription As String
+    Dim resizeOperations As Long
+    Dim valueBlockWrites As Long
+    Dim skippedValueBlocks As Long
+    Dim formatRangeWrites As Long
+    Dim outputClearWrites As Long
+    Dim targetedCalculations As Long
 
     Set perfScope = Profiler_BeginScope("Sync_WBS_To_CALC", "Excel Table Sync")
 
@@ -73,6 +82,13 @@ Sub Sync_WBS_To_CALC(Optional ByVal preserveCalcOutputs As Boolean = False)
 
     Set consoleMessages = New Collection
 
+    previousCalculation = Application.Calculation
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
+    previousStatusBar = Application.StatusBar
+    applicationStateCaptured = True
+
+    Application.Calculation = xlCalculationManual
     Application.ScreenUpdating = False
     Application.EnableEvents = False
 
@@ -97,7 +113,8 @@ Sub Sync_WBS_To_CALC(Optional ByVal preserveCalcOutputs As Boolean = False)
     Set mapCalc = CreateObject("Scripting.Dictionary")
     Set mapWBS = CreateObject("Scripting.Dictionary")
     Set wbsIdRows = CreateObject("Scripting.Dictionary")
-    Set wbsToId = CreateObject("Scripting.Dictionary")
+    Set inputColumns = CreateObject("Scripting.Dictionary")
+    Set missingIdRows = CreateObject("Scripting.Dictionary")
 
     colsToCopy = Array( _
         "WBS", _
@@ -130,6 +147,7 @@ Sub Sync_WBS_To_CALC(Optional ByVal preserveCalcOutputs As Boolean = False)
         "Total Float", _
         "Free Float", _
         "Critical Path REX", _
+        "Longest Path REX", _
         "Total Float REX", _
         "Free Float REX", _
         "Deadline Float" _
@@ -211,171 +229,73 @@ Sub Sync_WBS_To_CALC(Optional ByVal preserveCalcOutputs As Boolean = False)
         GoTo SafeExit
     End If
 
-    maxId = 0
+    DataSync_CalculateManagedWBSFormulaRanges tblWBS, targetedCalculations
+    If Not tblWBS.DataBodyRange Is Nothing Then wbsData = tblWBS.DataBodyRange.value
 
-    If Not tblWBS.DataBodyRange Is Nothing Then
-        For r = 1 To tblWBS.ListRows.Count
+    maxId = DataSync_IndexWBSRows( _
+        wbsData, mapWBS, wbsIdRows, consoleMessages)
+    If maxId < 0 Then GoTo SafeExit
 
-            idValue = tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value
-            wbsValue = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("WBS")).value))
-            wbsValue = Replace(wbsValue, ",", ".")
-
-            If Trim$(CStr(idValue)) <> "" Then
-
-                If Not IsNumeric(idValue) Then
-                    DataSync_AddConsoleMessage consoleMessages, "STOP", _
-                        "ID non numérique détecté dans WBS : " & CStr(idValue), _
-                        "Non-numeric ID detected in WBS: " & CStr(idValue)
-                    GoTo SafeExit
-                End If
-
-                If CLng(idValue) < 1 Then
-                    DataSync_AddConsoleMessage consoleMessages, "STOP", _
-                        "ID invalide dans WBS (doit être >= 1) : " & CStr(idValue), _
-                        "Invalid ID in WBS (must be >= 1): " & CStr(idValue)
-                    GoTo SafeExit
-                End If
-
-                idKey = CStr(CLng(idValue))
-                wbsIdRows(idKey) = r
-
-                If CLng(idValue) > maxId Then
-                    maxId = CLng(idValue)
-                End If
-
-                If wbsValue <> "" Then
-                    If wbsToId.Exists(wbsValue) Then
-                        DataSync_AddConsoleMessage consoleMessages, "STOP", _
-                            "WBS dupliqué détecté dans WBS : " & wbsValue, _
-                            "Duplicate WBS detected in WBS: " & wbsValue
-                        GoTo SafeExit
-                    Else
-                        wbsToId(wbsValue) = CLng(idValue)
-                    End If
-                End If
-
-            End If
-
-        Next r
-    End If
-
-    Set summaryWbsByWbs = BuildWBSSummaryWbsLookup(tblWBS, mapWBS)
+    Set summaryWbsByWbs = DataSync_BuildSummaryWbsLookupFromArray(wbsData, mapWBS)
     NormalizeWBSSummaryDisplayValues tblWBS, mapWBS, summaryWbsByWbs
     NormalizeWBSCalendarValues tblWBS, mapWBS, summaryWbsByWbs
 
-    If tblCalc.DataBodyRange Is Nothing Then
-        currentCalcRows = 0
-    Else
-        currentCalcRows = tblCalc.ListRows.Count
-    End If
+    'The two normalization contracts may update WBS. Refresh the source buffer
+    'once before constructing CALC so the observable legacy result is preserved.
+    If Not tblWBS.DataBodyRange Is Nothing Then wbsData = tblWBS.DataBodyRange.value
 
     targetRows = maxId
 
     If targetRows = 0 Then
-        Do While tblCalc.ListRows.Count > 0
-            tblCalc.ListRows(tblCalc.ListRows.Count).Delete
-        Loop
+        DataSync_ResizeCalcTable tblCalc, 0, resizeOperations
         GoTo SafeExit
     End If
 
-    If currentCalcRows < targetRows Then
-        For r = currentCalcRows + 1 To targetRows
-            tblCalc.ListRows.Add
-        Next r
-    ElseIf currentCalcRows > targetRows Then
-        For r = currentCalcRows To targetRows + 1 Step -1
-            tblCalc.ListRows(r).Delete
-        Next r
-    End If
+    DataSync_ResizeCalcTable tblCalc, targetRows, resizeOperations
 
-    For r = 1 To targetRows
-        tblCalc.DataBodyRange.Cells(r, mapCalc("ID")).value = r
-    Next r
+    DataSync_BuildCalcInputColumns _
+        wbsData, mapWBS, mapCalc, wbsIdRows, summaryWbsByWbs, _
+        targetRows, colsToCopy, inputColumns, missingIdRows
 
-    For r = 1 To targetRows
+    DataSync_WriteCalcInputBlocks _
+        tblCalc, mapCalc, inputColumns, _
+        valueBlockWrites, skippedValueBlocks
 
-        idKey = CStr(r)
-
-        If wbsIdRows.Exists(idKey) Then
-
-            wbsRowIndex = wbsIdRows(idKey)
-
-            For i = LBound(colsToCopy) To UBound(colsToCopy)
-                If mapWBS.Exists(colsToCopy(i)) And mapCalc.Exists(colsToCopy(i)) Then
-
-                    If colsToCopy(i) = "WBS" Or colsToCopy(i) = "Predecessors WBS" Then
-                        With tblCalc.DataBodyRange.Cells(r, mapCalc(colsToCopy(i)))
-                            .NumberFormat = "@"
-                            .value = CStr(tblWBS.DataBodyRange.Cells(wbsRowIndex, mapWBS(colsToCopy(i))).value)
-                        End With
-
-                    ElseIf colsToCopy(i) = "Task Type" Then
-                        taskTypeVal = NormalizeTaskTypeValue(tblWBS.DataBodyRange.Cells(wbsRowIndex, mapWBS("Task Type")).value)
-                        With tblCalc.DataBodyRange.Cells(r, mapCalc("Task Type"))
-                            .NumberFormat = "@"
-                            .value = taskTypeVal
-                        End With
-
-                    ElseIf colsToCopy(i) = "S" Then
-                        With tblCalc.DataBodyRange.Cells(r, mapCalc("S"))
-                            .NumberFormat = "@"
-                            .value = NormalizeSummaryDisplayValue(tblWBS.DataBodyRange.Cells(wbsRowIndex, mapWBS("S")).value)
-                        End With
-                    ElseIf colsToCopy(i) = "Cal" Then
-                        If IsCalendarIgnoredWBSRow(tblWBS, mapWBS, wbsRowIndex, summaryWbsByWbs) Then
-                            calVal = vbNullString
-                        Else
-                            calVal = NormalizeCalendarType(tblWBS.DataBodyRange.Cells(wbsRowIndex, mapWBS("Cal")).value)
-                        End If
-                        With tblCalc.DataBodyRange.Cells(r, mapCalc("Cal"))
-                            .NumberFormat = "@"
-                            .value = calVal
-                        End With
-
-                    Else
-                        tblCalc.DataBodyRange.Cells(r, mapCalc(colsToCopy(i))).value = _
-                            tblWBS.DataBodyRange.Cells(wbsRowIndex, mapWBS(colsToCopy(i))).value
-                    End If
-
-                End If
-            Next i
-        Else
-
-            For i = LBound(colsToCopy) To UBound(colsToCopy)
-                If mapCalc.Exists(colsToCopy(i)) Then
-                    tblCalc.DataBodyRange.Cells(r, mapCalc(colsToCopy(i))).ClearContents
-                End If
-            Next i
-
-            For i = LBound(colsToClear) To UBound(colsToClear)
-                If mapCalc.Exists(colsToClear(i)) Then
-                    tblCalc.DataBodyRange.Cells(r, mapCalc(colsToClear(i))).ClearContents
-                End If
-            Next i
-
-        End If
-
-    Next r
+    DataSync_ApplyCalcInputFormats tblCalc, formatRangeWrites
 
     If Not preserveCalcOutputs Then
-        For i = LBound(colsToClear) To UBound(colsToClear)
-            If mapCalc.Exists(colsToClear(i)) Then
-                If Not tblCalc.ListColumns(colsToClear(i)).DataBodyRange Is Nothing Then
-                    tblCalc.ListColumns(colsToClear(i)).DataBodyRange.ClearContents
-                End If
-            End If
-        Next i
+        DataSync_ClearCalcOutputColumns _
+            tblCalc, mapCalc, colsToClear, outputClearWrites
+    ElseIf missingIdRows.Count > 0 Then
+        DataSync_ClearMissingIdOutputs _
+            tblCalc, mapCalc, colsToClear, missingIdRows, outputClearWrites
     End If
 
 SafeExit:
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
+    errorNumber = Err.Number
+    errorDescription = Err.Description
 
-    If Err.Number <> 0 Then
+    Profiler_RecordOperation "DataSyncResizeOperations", resizeOperations, 0#
+    Profiler_RecordOperation "DataSyncValueBlockWrites", valueBlockWrites, 0#
+    Profiler_RecordOperation "DataSyncSkippedValueBlocks", skippedValueBlocks, 0#
+    Profiler_RecordOperation "DataSyncFormatRangeWrites", formatRangeWrites, 0#
+    Profiler_RecordOperation "DataSyncOutputClearWrites", outputClearWrites, 0#
+    Profiler_RecordOperation "DataSyncTargetedCalculations", targetedCalculations, 0#
+
+    If applicationStateCaptured Then
+        On Error Resume Next
+        Application.Calculation = previousCalculation
+        Application.EnableEvents = previousEnableEvents
+        Application.ScreenUpdating = previousScreenUpdating
+        Application.StatusBar = previousStatusBar
+        On Error GoTo 0
+    End If
+
+    If errorNumber <> 0 Then
         If consoleMessages Is Nothing Then Set consoleMessages = New Collection
         DataSync_AddConsoleMessage consoleMessages, "STOP", _
-            "Erreur dans Sync_WBS_To_CALC : " & Err.Description, _
-            "Error in Sync_WBS_To_CALC: " & Err.Description
+            "Erreur dans Sync_WBS_To_CALC : " & errorDescription, _
+            "Error in Sync_WBS_To_CALC: " & errorDescription
     End If
 
     If Not consoleMessages Is Nothing Then
@@ -383,6 +303,618 @@ SafeExit:
     End If
 
 End Sub
+
+'------------------------------------------------------------------------------
+' FR: Calcule une seule fois les colonnes de formules WBS lues par le Sync.
+' EN: Calculates once the managed WBS formula columns read by the sync.
+'------------------------------------------------------------------------------
+Private Sub DataSync_CalculateManagedWBSFormulaRanges( _
+    ByVal tblWBS As ListObject, _
+    ByRef calculationCount As Long)
+
+    Dim formulaRange As Range
+    Dim columnName As Variant
+    Dim targetRange As Range
+
+    If tblWBS Is Nothing Then Exit Sub
+    If tblWBS.DataBodyRange Is Nothing Then Exit Sub
+
+    For Each columnName In Array("Baseline Finish", "Actual Duration", "Calculated Duration")
+        If TableHasColumn(tblWBS, CStr(columnName)) Then
+            Set targetRange = tblWBS.ListColumns(CStr(columnName)).DataBodyRange
+            If Not targetRange Is Nothing Then
+                If formulaRange Is Nothing Then
+                    Set formulaRange = targetRange
+                Else
+                    Set formulaRange = Union(formulaRange, targetRange)
+                End If
+            End If
+        End If
+    Next columnName
+
+    If Not formulaRange Is Nothing Then
+        formulaRange.Calculate
+        calculationCount = calculationCount + 1
+    End If
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Indexe les lignes WBS par ID depuis le buffer memoire et retourne l'ID maximal.
+' EN: Indexes WBS rows by ID from the memory buffer and returns the maximum ID.
+'------------------------------------------------------------------------------
+Private Function DataSync_IndexWBSRows( _
+    ByVal wbsData As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal wbsIdRows As Object, _
+    ByVal consoleMessages As Collection) As Long
+
+    Dim r As Long
+    Dim idValue As Variant
+    Dim idNumber As Long
+    Dim idKey As String
+    Dim wbsValue As String
+    Dim wbsToId As Object
+
+    DataSync_IndexWBSRows = 0
+    If Not IsArray(wbsData) Then Exit Function
+    Set wbsToId = CreateObject("Scripting.Dictionary")
+
+    For r = 1 To UBound(wbsData, 1)
+        idValue = wbsData(r, mapWBS("ID"))
+        wbsValue = Replace$(Trim$(CStr(wbsData(r, mapWBS("WBS")))), ",", ".")
+
+        If Trim$(CStr(idValue)) <> "" Then
+            If Not IsNumeric(idValue) Then
+                DataSync_AddConsoleMessage consoleMessages, "STOP", _
+                    "ID non numerique detecte dans WBS : " & CStr(idValue), _
+                    "Non-numeric ID detected in WBS: " & CStr(idValue)
+                DataSync_IndexWBSRows = -1
+                Exit Function
+            End If
+
+            idNumber = CLng(idValue)
+            If idNumber < 1 Then
+                DataSync_AddConsoleMessage consoleMessages, "STOP", _
+                    "ID invalide dans WBS (doit etre >= 1) : " & CStr(idValue), _
+                    "Invalid ID in WBS (must be >= 1): " & CStr(idValue)
+                DataSync_IndexWBSRows = -1
+                Exit Function
+            End If
+
+            idKey = CStr(idNumber)
+            wbsIdRows(idKey) = r
+            If idNumber > DataSync_IndexWBSRows Then DataSync_IndexWBSRows = idNumber
+
+            If wbsValue <> "" Then
+                If wbsToId.Exists(wbsValue) Then
+                    DataSync_AddConsoleMessage consoleMessages, "STOP", _
+                        "WBS duplique detecte dans WBS : " & wbsValue, _
+                        "Duplicate WBS detected in WBS: " & wbsValue
+                    DataSync_IndexWBSRows = -1
+                    Exit Function
+                End If
+                wbsToId(wbsValue) = idNumber
+            End If
+        End If
+    Next r
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Redimensionne tbl_CALC en une operation lorsque la taille cible change.
+' EN: Resizes tbl_CALC in one operation when the target size changes.
+'------------------------------------------------------------------------------
+Private Sub DataSync_ResizeCalcTable( _
+    ByVal tblCalc As ListObject, _
+    ByVal targetRows As Long, _
+    ByRef resizeCount As Long)
+
+    Dim targetRange As Range
+
+    If tblCalc Is Nothing Then Exit Sub
+    If targetRows < 0 Then targetRows = 0
+    If tblCalc.ListRows.Count = targetRows Then Exit Sub
+
+    If targetRows = 0 Then
+        Do While tblCalc.ListRows.Count > 0
+            tblCalc.ListRows(tblCalc.ListRows.Count).Delete
+        Loop
+        resizeCount = resizeCount + 1
+        Exit Sub
+    End If
+
+    Set targetRange = tblCalc.HeaderRowRange.Cells(1, 1).Resize( _
+        targetRows + 1, tblCalc.ListColumns.Count)
+    tblCalc.Resize targetRange
+    resizeCount = resizeCount + 1
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Construit en memoire l'etat final des colonnes d'entree CALC.
+' EN: Builds the final CALC input-column state in memory.
+'------------------------------------------------------------------------------
+Private Sub DataSync_BuildCalcInputColumns( _
+    ByVal wbsData As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal mapCalc As Object, _
+    ByVal wbsIdRows As Object, _
+    ByVal summaryWbsByWbs As Object, _
+    ByVal targetRows As Long, _
+    ByVal copiedColumns As Variant, _
+    ByVal inputColumns As Object, _
+    ByVal missingIdRows As Object)
+
+    Dim columnName As Variant
+    Dim columnValues() As Variant
+    Dim calcRow As Long
+    Dim wbsRow As Long
+    Dim taskTypeValue As String
+    Dim wbsValue As String
+    Dim sourceValue As Variant
+
+    ReDim columnValues(1 To targetRows, 1 To 1)
+    For calcRow = 1 To targetRows
+        columnValues(calcRow, 1) = calcRow
+    Next calcRow
+    inputColumns("ID") = columnValues
+
+    For Each columnName In copiedColumns
+        If Not mapWBS.Exists(CStr(columnName)) _
+            Or Not mapCalc.Exists(CStr(columnName)) Then
+            GoTo NextColumn
+        End If
+
+        ReDim columnValues(1 To targetRows, 1 To 1)
+
+        For calcRow = 1 To targetRows
+            If wbsIdRows.Exists(CStr(calcRow)) Then
+                wbsRow = CLng(wbsIdRows(CStr(calcRow)))
+                sourceValue = wbsData(wbsRow, mapWBS(CStr(columnName)))
+
+                Select Case CStr(columnName)
+                    Case "WBS", "Predecessors WBS"
+                        columnValues(calcRow, 1) = CStr(sourceValue)
+
+                    Case "Task Type"
+                        columnValues(calcRow, 1) = NormalizeTaskTypeValue(sourceValue)
+
+                    Case "S"
+                        columnValues(calcRow, 1) = NormalizeSummaryDisplayValue(sourceValue)
+
+                    Case "Cal"
+                        wbsValue = Replace$(Trim$(CStr(wbsData(wbsRow, mapWBS("WBS")))), ",", ".")
+                        taskTypeValue = UCase$(NormalizeTaskTypeValue( _
+                            wbsData(wbsRow, mapWBS("Task Type"))))
+
+                        If summaryWbsByWbs.Exists(wbsValue) _
+                            Or taskTypeValue = "LEVEL OF EFFORT" _
+                            Or taskTypeValue = "MILESTONE" Then
+                            columnValues(calcRow, 1) = vbNullString
+                        Else
+                            columnValues(calcRow, 1) = NormalizeCalendarType(sourceValue)
+                        End If
+
+                    Case Else
+                        columnValues(calcRow, 1) = sourceValue
+                End Select
+            Else
+                columnValues(calcRow, 1) = Empty
+                missingIdRows(CStr(calcRow)) = True
+            End If
+        Next calcRow
+
+        inputColumns(CStr(columnName)) = columnValues
+NextColumn:
+    Next columnName
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Ecrit les colonnes d'entree CALC par groupes contigus seulement si elles divergent.
+' EN: Writes CALC input columns in contiguous groups only when they differ.
+'------------------------------------------------------------------------------
+Private Sub DataSync_WriteCalcInputBlocks( _
+    ByVal tblCalc As ListObject, _
+    ByVal mapCalc As Object, _
+    ByVal inputColumns As Object, _
+    ByRef writeCount As Long, _
+    ByRef skippedCount As Long)
+
+    Dim sortedNames As Variant
+    Dim groupStart As Long
+    Dim groupEnd As Long
+    Dim i As Long
+    Dim currentIndex As Long
+    Dim previousIndex As Long
+
+    If tblCalc Is Nothing Then Exit Sub
+    If tblCalc.DataBodyRange Is Nothing Then Exit Sub
+
+    sortedNames = DataSync_SortedInputColumnNames(mapCalc, inputColumns)
+    groupStart = LBound(sortedNames)
+    previousIndex = CLng(mapCalc(CStr(sortedNames(groupStart))))
+
+    For i = groupStart + 1 To UBound(sortedNames)
+        currentIndex = CLng(mapCalc(CStr(sortedNames(i))))
+        If currentIndex <> previousIndex + 1 Then
+            groupEnd = i - 1
+            DataSync_WriteOneInputBlock tblCalc, mapCalc, inputColumns, _
+                sortedNames, groupStart, groupEnd, writeCount, skippedCount
+            groupStart = i
+        End If
+        previousIndex = currentIndex
+    Next i
+
+    DataSync_WriteOneInputBlock tblCalc, mapCalc, inputColumns, _
+        sortedNames, groupStart, UBound(sortedNames), writeCount, skippedCount
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Trie les noms des colonnes d'entree selon leur position reelle dans CALC.
+' EN: Sorts input column names by their actual CALC position.
+'------------------------------------------------------------------------------
+Private Function DataSync_SortedInputColumnNames( _
+    ByVal mapCalc As Object, _
+    ByVal inputColumns As Object) As Variant
+
+    Dim names() As Variant
+    Dim key As Variant
+    Dim i As Long
+    Dim j As Long
+    Dim swapValue As Variant
+
+    ReDim names(0 To inputColumns.Count - 1)
+    For Each key In inputColumns.Keys
+        names(i) = CStr(key)
+        i = i + 1
+    Next key
+
+    For i = LBound(names) To UBound(names) - 1
+        For j = i + 1 To UBound(names)
+            If CLng(mapCalc(CStr(names(j)))) < CLng(mapCalc(CStr(names(i)))) Then
+                swapValue = names(i)
+                names(i) = names(j)
+                names(j) = swapValue
+            End If
+        Next j
+    Next i
+
+    DataSync_SortedInputColumnNames = names
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Compare puis ecrit un groupe contigu de colonnes CALC en une affectation.
+' EN: Compares and writes one contiguous CALC column group in one assignment.
+'------------------------------------------------------------------------------
+Private Sub DataSync_WriteOneInputBlock( _
+    ByVal tblCalc As ListObject, _
+    ByVal mapCalc As Object, _
+    ByVal inputColumns As Object, _
+    ByVal sortedNames As Variant, _
+    ByVal firstNameIndex As Long, _
+    ByVal lastNameIndex As Long, _
+    ByRef writeCount As Long, _
+    ByRef skippedCount As Long)
+
+    Dim targetRange As Range
+    Dim expectedValues() As Variant
+    Dim currentValues As Variant
+    Dim columnValues As Variant
+    Dim rowCount As Long
+    Dim columnCount As Long
+    Dim r As Long
+    Dim c As Long
+    Dim firstColumn As Long
+
+    rowCount = tblCalc.ListRows.Count
+    columnCount = lastNameIndex - firstNameIndex + 1
+    firstColumn = CLng(mapCalc(CStr(sortedNames(firstNameIndex))))
+
+    ReDim expectedValues(1 To rowCount, 1 To columnCount)
+    For c = 1 To columnCount
+        columnValues = inputColumns(CStr(sortedNames(firstNameIndex + c - 1)))
+        For r = 1 To rowCount
+            expectedValues(r, c) = columnValues(r, 1)
+        Next r
+    Next c
+
+    Set targetRange = tblCalc.DataBodyRange.Cells(1, firstColumn).Resize( _
+        rowCount, columnCount)
+    currentValues = targetRange.value
+
+    If DataSync_RangeValuesEqual(currentValues, expectedValues, rowCount, columnCount) Then
+        skippedCount = skippedCount + 1
+    Else
+        targetRange.value = expectedValues
+        writeCount = writeCount + 1
+    End If
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Compare deux buffers de plage sans conversion destructive des types VBA.
+' EN: Compares two range buffers without destructive VBA type conversion.
+'------------------------------------------------------------------------------
+Private Function DataSync_RangeValuesEqual( _
+    ByVal currentValues As Variant, _
+    ByVal expectedValues As Variant, _
+    ByVal rowCount As Long, _
+    ByVal columnCount As Long) As Boolean
+
+    Dim r As Long
+    Dim c As Long
+
+    If rowCount = 1 And columnCount = 1 And Not IsArray(currentValues) Then
+        DataSync_RangeValuesEqual = DataSync_ValuesEqual( _
+            currentValues, expectedValues(1, 1))
+        Exit Function
+    End If
+
+    For r = 1 To rowCount
+        For c = 1 To columnCount
+            If Not DataSync_ValuesEqual(currentValues(r, c), expectedValues(r, c)) Then
+                Exit Function
+            End If
+        Next c
+    Next r
+
+    DataSync_RangeValuesEqual = True
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Compare deux valeurs Excel en preservant les distinctions utiles au moteur.
+' EN: Compares two Excel values while preserving distinctions relevant to the engine.
+'------------------------------------------------------------------------------
+Private Function DataSync_ValuesEqual( _
+    ByVal leftValue As Variant, _
+    ByVal rightValue As Variant) As Boolean
+
+    Dim leftType As VbVarType
+    Dim rightType As VbVarType
+
+    If IsError(leftValue) Or IsError(rightValue) Then
+        If IsError(leftValue) And IsError(rightValue) Then
+            DataSync_ValuesEqual = ( _
+                DataSync_ErrorCode(leftValue) = DataSync_ErrorCode(rightValue))
+        End If
+        Exit Function
+    End If
+
+    If IsNull(leftValue) Or IsNull(rightValue) Then
+        DataSync_ValuesEqual = (IsNull(leftValue) And IsNull(rightValue))
+        Exit Function
+    End If
+
+    If DataSync_IsBlankValue(leftValue) Or DataSync_IsBlankValue(rightValue) Then
+        DataSync_ValuesEqual = ( _
+            DataSync_IsBlankValue(leftValue) And DataSync_IsBlankValue(rightValue))
+        Exit Function
+    End If
+
+    leftType = VarType(leftValue)
+    rightType = VarType(rightValue)
+
+    If leftType <> vbString And rightType <> vbString Then
+        If IsNumeric(leftValue) And IsNumeric(rightValue) Then
+            DataSync_ValuesEqual = (CDbl(leftValue) = CDbl(rightValue))
+            Exit Function
+        End If
+    End If
+
+    If leftType <> rightType Then Exit Function
+
+    Select Case leftType
+        Case vbByte, vbInteger, vbLong, vbSingle, vbDouble, vbCurrency, vbDecimal, vbDate
+            DataSync_ValuesEqual = (CDbl(leftValue) = CDbl(rightValue))
+        Case vbBoolean
+            DataSync_ValuesEqual = (CBool(leftValue) = CBool(rightValue))
+        Case Else
+            DataSync_ValuesEqual = (CStr(leftValue) = CStr(rightValue))
+    End Select
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Reconnait les deux representations Excel equivalentes d'une cellule vide.
+' EN: Recognizes Excel's two equivalent representations of an empty cell.
+'------------------------------------------------------------------------------
+Private Function DataSync_IsBlankValue(ByVal value As Variant) As Boolean
+
+    If IsEmpty(value) Then
+        DataSync_IsBlankValue = True
+    ElseIf VarType(value) = vbString Then
+        DataSync_IsBlankValue = (Len(CStr(value)) = 0)
+    End If
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne le code d'une erreur Excel pour une comparaison exacte en memoire.
+' EN: Returns an Excel error code for exact in-memory comparison.
+'------------------------------------------------------------------------------
+Private Function DataSync_ErrorCode(ByVal errorValue As Variant) As Long
+
+    On Error GoTo UnknownError
+    DataSync_ErrorCode = CLng(Application.WorksheetFunction.Error_Type(errorValue))
+    Exit Function
+
+UnknownError:
+    DataSync_ErrorCode = -1
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Applique les formats des colonnes d'entree par plages completes de table.
+' EN: Applies input-column formats to complete table ranges.
+'------------------------------------------------------------------------------
+Private Sub DataSync_ApplyCalcInputFormats( _
+    ByVal tblCalc As ListObject, _
+    ByRef formatWriteCount As Long)
+
+    Dim columnName As Variant
+
+    For Each columnName In Array( _
+        "WBS", "Task Name", "Task Type", "S", "Cal", "Predecessors WBS")
+        DataSync_EnsureColumnFormat tblCalc, CStr(columnName), "@", formatWriteCount
+    Next columnName
+
+    For Each columnName In Array( _
+        "Baseline Start", "Baseline Finish", "Actual Start", "Actual Finish", _
+        "Forecast Start", "Forecast Finish")
+        DataSync_EnsureColumnFormat tblCalc, CStr(columnName), _
+            "dd/mm/yyyy", formatWriteCount
+    Next columnName
+
+    For Each columnName In Array("ID", "Baseline Duration", "Actual Duration")
+        DataSync_EnsureColumnFormat tblCalc, CStr(columnName), "0", formatWriteCount
+    Next columnName
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Ecrit un format de colonne uniquement lorsque la plage diverge.
+' EN: Writes a column format only when the range differs.
+'------------------------------------------------------------------------------
+Private Sub DataSync_EnsureColumnFormat( _
+    ByVal tblCalc As ListObject, _
+    ByVal columnName As String, _
+    ByVal expectedFormat As String, _
+    ByRef formatWriteCount As Long)
+
+    Dim targetRange As Range
+    Dim currentFormat As Variant
+
+    If Not TableHasColumn(tblCalc, columnName) Then Exit Sub
+    Set targetRange = tblCalc.ListColumns(columnName).DataBodyRange
+    If targetRange Is Nothing Then Exit Sub
+
+    currentFormat = targetRange.NumberFormat
+    If IsNull(currentFormat) Or CStr(currentFormat) <> expectedFormat Then
+        targetRange.NumberFormat = expectedFormat
+        formatWriteCount = formatWriteCount + 1
+    End If
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Invalide les colonnes de sortie CALC par plages de colonnes.
+' EN: Invalidates CALC output columns by column ranges.
+'------------------------------------------------------------------------------
+Private Sub DataSync_ClearCalcOutputColumns( _
+    ByVal tblCalc As ListObject, _
+    ByVal mapCalc As Object, _
+    ByVal outputColumns As Variant, _
+    ByRef clearCount As Long)
+
+    Dim columnName As Variant
+    Dim targetRange As Range
+    Dim clearRange As Range
+
+    For Each columnName In outputColumns
+        If mapCalc.Exists(CStr(columnName)) Then
+            Set targetRange = tblCalc.ListColumns(CStr(columnName)).DataBodyRange
+            If Not targetRange Is Nothing Then
+                If clearRange Is Nothing Then
+                    Set clearRange = targetRange
+                Else
+                    Set clearRange = Union(clearRange, targetRange)
+                End If
+            End If
+        End If
+    Next columnName
+
+    If Not clearRange Is Nothing Then
+        clearRange.ClearContents
+        clearCount = clearCount + 1
+    End If
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Efface les sorties uniquement pour les IDs absents lorsque leur conservation est demandee.
+' EN: Clears outputs only for missing IDs when output preservation is requested.
+'------------------------------------------------------------------------------
+Private Sub DataSync_ClearMissingIdOutputs( _
+    ByVal tblCalc As ListObject, _
+    ByVal mapCalc As Object, _
+    ByVal outputColumns As Variant, _
+    ByVal missingIdRows As Object, _
+    ByRef writeCount As Long)
+
+    Dim columnName As Variant
+    Dim targetRange As Range
+    Dim values As Variant
+    Dim rowKey As Variant
+    Dim changed As Boolean
+    Dim rowCount As Long
+
+    rowCount = tblCalc.ListRows.Count
+    For Each columnName In outputColumns
+        If mapCalc.Exists(CStr(columnName)) Then
+            Set targetRange = tblCalc.ListColumns(CStr(columnName)).DataBodyRange
+            If Not targetRange Is Nothing Then
+                values = targetRange.value
+                changed = False
+
+                For Each rowKey In missingIdRows.Keys
+                    If rowCount = 1 And Not IsArray(values) Then
+                        If Not DataSync_ValuesEqual(values, Empty) Then
+                            values = Empty
+                            changed = True
+                        End If
+                    ElseIf Not DataSync_ValuesEqual(values(CLng(rowKey), 1), Empty) Then
+                        values(CLng(rowKey), 1) = Empty
+                        changed = True
+                    End If
+                Next rowKey
+
+                If changed Then
+                    targetRange.value = values
+                    writeCount = writeCount + 1
+                End If
+            End If
+        End If
+    Next columnName
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Construit l'ensemble des WBS parents depuis le buffer source.
+' EN: Builds the parent-WBS set from the source buffer.
+'------------------------------------------------------------------------------
+Private Function DataSync_BuildSummaryWbsLookupFromArray( _
+    ByVal wbsData As Variant, _
+    ByVal mapWBS As Object) As Object
+
+    Dim result As Object
+    Dim r As Long
+    Dim wbsValue As String
+    Dim parentWbs As String
+
+    Set result = CreateObject("Scripting.Dictionary")
+    If Not IsArray(wbsData) Then
+        Set DataSync_BuildSummaryWbsLookupFromArray = result
+        Exit Function
+    End If
+
+    For r = 1 To UBound(wbsData, 1)
+        wbsValue = Replace$(Trim$(CStr(wbsData(r, mapWBS("WBS")))), ",", ".")
+        parentWbs = GetParentWBS(wbsValue)
+
+        Do While parentWbs <> ""
+            result(parentWbs) = True
+            parentWbs = GetParentWBS(parentWbs)
+        Loop
+    Next r
+
+    Set DataSync_BuildSummaryWbsLookupFromArray = result
+
+End Function
 
 
 '------------------------------------------------------------------------------
@@ -758,12 +1290,34 @@ Private Sub EnsureLongestPathOutputColumnsExist( _
         newCol.Name = "Longest Path"
     End If
 
+    colIndex = 0
+    On Error Resume Next
+    colIndex = tblWBS.ListColumns("Longest Path REX").Index
+    On Error GoTo 0
+
+    If colIndex <= 0 Then
+        Set newCol = tblWBS.ListColumns.Add(Position:=tblWBS.ListColumns("Longest Path").Index + 1)
+        newCol.Name = "Longest Path REX"
+    End If
+
+    colIndex = 0
+    On Error Resume Next
+    colIndex = tblCalc.ListColumns("Longest Path REX").Index
+    On Error GoTo 0
+
+    If colIndex <= 0 Then
+        Set newCol = tblCalc.ListColumns.Add(Position:=tblCalc.ListColumns("Longest Path").Index + 1)
+        newCol.Name = "Longest Path REX"
+    End If
+
     If Not tblWBS.DataBodyRange Is Nothing Then
         tblWBS.ListColumns("Longest Path").DataBodyRange.NumberFormat = "@"
+        tblWBS.ListColumns("Longest Path REX").DataBodyRange.NumberFormat = "@"
     End If
 
     If Not tblCalc.DataBodyRange Is Nothing Then
         tblCalc.ListColumns("Longest Path").DataBodyRange.NumberFormat = "@"
+        tblCalc.ListColumns("Longest Path REX").DataBodyRange.NumberFormat = "@"
     End If
 
 End Sub
@@ -954,6 +1508,7 @@ Private Function IsAllowedCalculatedPushField(ByVal fieldName As String) As Bool
              "Driving Logic", _
              "Critical Path", _
              "Longest Path", _
+             "Longest Path REX", _
              "Critical Path REX", _
              "Total Float", _
              "Free Float", _
@@ -1382,9 +1937,16 @@ Private Sub EnsureWBSTaskTypeInputSetup(ByVal tblWBS As ListObject)
     Dim perfScope As clsPerfScope
 
     Dim rng As Range
-    Dim cell As Range
+    Dim tableData As Variant
+    Dim outputValues() As Variant
     Dim normalizedValue As String
     Dim rowIndex As Long
+    Dim rowCount As Long
+    Dim idIndex As Long
+    Dim wbsIndex As Long
+    Dim taskTypeIndex As Long
+    Dim hasIdentity As Boolean
+    Dim changed As Boolean
 
     Set perfScope = Profiler_BeginScope("EnsureWBSTaskTypeInputSetup", "Excel Validation")
 
@@ -1398,25 +1960,34 @@ Private Sub EnsureWBSTaskTypeInputSetup(ByVal tblWBS As ListObject)
     If tblWBS.DataBodyRange Is Nothing Then Exit Sub
 
     Set rng = tblWBS.ListColumns("Task Type").DataBodyRange
+    tableData = tblWBS.DataBodyRange.value
+    rowCount = tblWBS.ListRows.Count
+    idIndex = tblWBS.ListColumns("ID").Index
+    wbsIndex = tblWBS.ListColumns("WBS").Index
+    taskTypeIndex = tblWBS.ListColumns("Task Type").Index
+    ReDim outputValues(1 To rowCount, 1 To 1)
 
     'Default blank cells to Task only on rows that have an ID/WBS identity.
-    For Each cell In rng.Cells
+    For rowIndex = 1 To rowCount
+        hasIdentity = ( _
+            Trim$(CStr(tableData(rowIndex, idIndex))) <> "" _
+            Or Replace$(Trim$(CStr(tableData(rowIndex, wbsIndex))), ",", ".") <> "")
 
-        rowIndex = cell.Row - rng.Row + 1
-
-        If Not WBSRowHasTaskIdentity(tblWBS, rowIndex, Nothing) Then
-            If Trim$(CStr(cell.value)) <> "" Then cell.ClearContents
+        If Not hasIdentity Then
+            outputValues(rowIndex, 1) = Empty
+            If Trim$(CStr(tableData(rowIndex, taskTypeIndex))) <> "" Then changed = True
         Else
-            normalizedValue = NormalizeTaskTypeValue(cell.value)
+            normalizedValue = NormalizeTaskTypeValue(tableData(rowIndex, taskTypeIndex))
+            outputValues(rowIndex, 1) = normalizedValue
 
-            If Trim$(CStr(cell.value)) = "" Then
-                cell.value = "Task"
-            ElseIf CStr(cell.value) <> normalizedValue Then
-                cell.value = normalizedValue
-            End If
+            If CStr(tableData(rowIndex, taskTypeIndex)) <> normalizedValue Then changed = True
         End If
+    Next rowIndex
 
-    Next cell
+    If changed Then
+        rng.value = outputValues
+        Profiler_RecordOperation "DataSyncWbsTaskTypeBlockWrites", 1, 0#
+    End If
 
     'Apply dropdown validation.
     With rng.Validation
@@ -1528,43 +2099,6 @@ Private Function NormalizeSummaryDisplayValue(ByVal rawValue As Variant) As Stri
 End Function
 
 '------------------------------------------------------------------------------
-' FR: Retourne la map Default Summary Display Value sans modifier les donnees d'entree.
-' EN: Returns the Default Summary Display Value map without mutating input data.
-'------------------------------------------------------------------------------
-
-Private Function DefaultSummaryDisplayValue( _
-    ByVal tblWBS As ListObject, _
-    ByVal mapWBS As Object, _
-    ByVal rowIndex As Long, _
-    ByVal summaryWbsByWbs As Object) As String
-
-    Dim wbsVal As String
-    Dim taskTypeVal As String
-
-    DefaultSummaryDisplayValue = "N"
-
-    If tblWBS Is Nothing Then Exit Function
-    If tblWBS.DataBodyRange Is Nothing Then Exit Function
-    If mapWBS Is Nothing Then Exit Function
-
-    If mapWBS.Exists("WBS") Then
-        wbsVal = Replace$(Trim$(CStr(tblWBS.DataBodyRange.Cells(rowIndex, mapWBS("WBS")).value)), ",", ".")
-        If Not summaryWbsByWbs Is Nothing Then
-            If summaryWbsByWbs.Exists(wbsVal) Then
-                DefaultSummaryDisplayValue = "Y"
-                Exit Function
-            End If
-        End If
-    End If
-
-    If mapWBS.Exists("Task Type") Then
-        taskTypeVal = UCase$(NormalizeTaskTypeValue(tblWBS.DataBodyRange.Cells(rowIndex, mapWBS("Task Type")).value))
-        If taskTypeVal = "MILESTONE" Then DefaultSummaryDisplayValue = "Y"
-    End If
-
-End Function
-
-'------------------------------------------------------------------------------
 ' FR: Normalise WBSSummary Display Values dans un format exploitable.
 ' EN: Normalizes WBSSummary Display Values into a usable format.
 '------------------------------------------------------------------------------
@@ -1576,8 +2110,19 @@ Private Sub NormalizeWBSSummaryDisplayValues( _
     Dim perfScope As clsPerfScope
 
     Dim r As Long
-    Dim cell As Range
+    Dim tableData As Variant
+    Dim outputValues() As Variant
     Dim normalizedValue As String
+    Dim defaultValue As String
+    Dim rowCount As Long
+    Dim idIndex As Long
+    Dim wbsIndex As Long
+    Dim taskTypeIndex As Long
+    Dim summaryIndex As Long
+    Dim hasIdentity As Boolean
+    Dim wbsValue As String
+    Dim taskTypeValue As String
+    Dim changed As Boolean
 
     Set perfScope = Profiler_BeginScope("NormalizeWBSSummaryDisplayValues", "Excel Cell Write")
 
@@ -1586,18 +2131,43 @@ Private Sub NormalizeWBSSummaryDisplayValues( _
     If mapWBS Is Nothing Then Exit Sub
     If Not mapWBS.Exists("S") Then Exit Sub
 
-    For r = 1 To tblWBS.ListRows.Count
-        Set cell = tblWBS.DataBodyRange.Cells(r, mapWBS("S"))
+    tableData = tblWBS.DataBodyRange.value
+    rowCount = tblWBS.ListRows.Count
+    idIndex = CLng(mapWBS("ID"))
+    wbsIndex = CLng(mapWBS("WBS"))
+    taskTypeIndex = CLng(mapWBS("Task Type"))
+    summaryIndex = CLng(mapWBS("S"))
+    ReDim outputValues(1 To rowCount, 1 To 1)
 
-        If Not WBSRowHasTaskIdentity(tblWBS, r, mapWBS) Then
-            If Trim$(CStr(cell.value)) <> "" Then cell.ClearContents
-        ElseIf Trim$(CStr(cell.value)) = "" Then
-            cell.value = DefaultSummaryDisplayValue(tblWBS, mapWBS, r, summaryWbsByWbs)
+    For r = 1 To rowCount
+        wbsValue = Replace$(Trim$(CStr(tableData(r, wbsIndex))), ",", ".")
+        hasIdentity = (Trim$(CStr(tableData(r, idIndex))) <> "" Or wbsValue <> "")
+
+        If Not hasIdentity Then
+            outputValues(r, 1) = Empty
+            If Trim$(CStr(tableData(r, summaryIndex))) <> "" Then changed = True
+        ElseIf Trim$(CStr(tableData(r, summaryIndex))) = "" Then
+            defaultValue = "N"
+            If summaryWbsByWbs.Exists(wbsValue) Then
+                defaultValue = "Y"
+            Else
+                taskTypeValue = UCase$(NormalizeTaskTypeValue(tableData(r, taskTypeIndex)))
+                If taskTypeValue = "MILESTONE" Then defaultValue = "Y"
+            End If
+
+            outputValues(r, 1) = defaultValue
+            changed = True
         Else
-            normalizedValue = NormalizeSummaryDisplayValue(cell.value)
-            If CStr(cell.value) <> normalizedValue Then cell.value = normalizedValue
+            normalizedValue = NormalizeSummaryDisplayValue(tableData(r, summaryIndex))
+            outputValues(r, 1) = normalizedValue
+            If CStr(tableData(r, summaryIndex)) <> normalizedValue Then changed = True
         End If
     Next r
+
+    If changed Then
+        tblWBS.ListColumns("S").DataBodyRange.value = outputValues
+        Profiler_RecordOperation "DataSyncWbsSummaryBlockWrites", 1, 0#
+    End If
 
 End Sub
 '------------------------------------------------------------------------------
@@ -1609,8 +2179,6 @@ Private Sub EnsureWBSCalendarInputSetup(ByVal tblWBS As ListObject)
     Dim perfScope As clsPerfScope
 
     Dim rng As Range
-    Dim cell As Range
-    Dim normalizedValue As String
     Dim newCol As ListColumn
 
     Set perfScope = Profiler_BeginScope("EnsureWBSCalendarInputSetup", "Excel Validation")
@@ -1625,13 +2193,6 @@ Private Sub EnsureWBSCalendarInputSetup(ByVal tblWBS As ListObject)
     If tblWBS.DataBodyRange Is Nothing Then Exit Sub
 
     Set rng = tblWBS.ListColumns("Cal").DataBodyRange
-
-    For Each cell In rng.Cells
-        If Trim$(CStr(cell.value)) <> "" Then
-            normalizedValue = NormalizeCalendarType(cell.value)
-            If CStr(cell.value) <> normalizedValue Then cell.value = normalizedValue
-        End If
-    Next cell
 
     With rng.Validation
         .Delete
@@ -1654,92 +2215,6 @@ Private Sub EnsureWBSCalendarInputSetup(ByVal tblWBS As ListObject)
 End Sub
 
 '------------------------------------------------------------------------------
-' FR: Construit la map WBS Summary WBS Lookup a partir des donnees fournies par l'appelant.
-' EN: Builds the WBS Summary WBS Lookup map from data supplied by the caller.
-'------------------------------------------------------------------------------
-
-Private Function BuildWBSSummaryWbsLookup( _
-    ByVal tblWBS As ListObject, _
-    ByVal mapWBS As Object) As Object
-
-    Dim perfScope As clsPerfScope
-
-    Dim summaryWbs As Object
-    Dim r As Long
-    Dim wbsVal As String
-    Dim parentWbs As String
-
-    Set perfScope = Profiler_BeginScope("BuildWBSSummaryWbsLookup", "Dictionary")
-
-    Set summaryWbs = CreateObject("Scripting.Dictionary")
-
-    If tblWBS Is Nothing Then
-        Set BuildWBSSummaryWbsLookup = summaryWbs
-        Exit Function
-    End If
-    If tblWBS.DataBodyRange Is Nothing Then
-        Set BuildWBSSummaryWbsLookup = summaryWbs
-        Exit Function
-    End If
-    If mapWBS Is Nothing Then
-        Set BuildWBSSummaryWbsLookup = summaryWbs
-        Exit Function
-    End If
-    If Not mapWBS.Exists("WBS") Then
-        Set BuildWBSSummaryWbsLookup = summaryWbs
-        Exit Function
-    End If
-
-    For r = 1 To tblWBS.ListRows.Count
-        wbsVal = Replace$(Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("WBS")).value)), ",", ".")
-        parentWbs = GetParentWBS(wbsVal)
-
-        Do While parentWbs <> ""
-            summaryWbs(parentWbs) = True
-            parentWbs = GetParentWBS(parentWbs)
-        Loop
-    Next r
-
-    Set BuildWBSSummaryWbsLookup = summaryWbs
-
-End Function
-
-'------------------------------------------------------------------------------
-' FR: Indique si Calendar Ignored WBSRow est vrai pour le contexte courant.
-' EN: Returns whether Calendar Ignored WBSRow is true for the current context.
-'------------------------------------------------------------------------------
-Private Function IsCalendarIgnoredWBSRow( _
-    ByVal tblWBS As ListObject, _
-    ByVal mapWBS As Object, _
-    ByVal rowIndex As Long, _
-    ByVal summaryWbsByWbs As Object) As Boolean
-
-    Dim wbsVal As String
-    Dim taskTypeVal As String
-
-    If tblWBS Is Nothing Then Exit Function
-    If tblWBS.DataBodyRange Is Nothing Then Exit Function
-    If mapWBS Is Nothing Then Exit Function
-    If rowIndex < 1 Or rowIndex > tblWBS.ListRows.Count Then Exit Function
-
-    If mapWBS.Exists("WBS") Then
-        wbsVal = Replace$(Trim$(CStr(tblWBS.DataBodyRange.Cells(rowIndex, mapWBS("WBS")).value)), ",", ".")
-        If Not summaryWbsByWbs Is Nothing Then
-            If summaryWbsByWbs.Exists(wbsVal) Then
-                IsCalendarIgnoredWBSRow = True
-                Exit Function
-            End If
-        End If
-    End If
-
-    If mapWBS.Exists("Task Type") Then
-        taskTypeVal = UCase$(NormalizeTaskTypeValue(tblWBS.DataBodyRange.Cells(rowIndex, mapWBS("Task Type")).value))
-        IsCalendarIgnoredWBSRow = (taskTypeVal = "LEVEL OF EFFORT" Or taskTypeVal = "MILESTONE")
-    End If
-
-End Function
-
-'------------------------------------------------------------------------------
 ' FR: Normalise WBSCalendar Values dans un format exploitable.
 ' EN: Normalizes WBSCalendar Values into a usable format.
 '------------------------------------------------------------------------------
@@ -1751,9 +2226,19 @@ Private Sub NormalizeWBSCalendarValues( _
     Dim perfScope As clsPerfScope
 
     Dim r As Long
-    Dim cell As Range
+    Dim tableData As Variant
+    Dim outputValues() As Variant
     Dim normalizedValue As String
-    Dim rowIndex As Long
+    Dim rowCount As Long
+    Dim idIndex As Long
+    Dim wbsIndex As Long
+    Dim taskTypeIndex As Long
+    Dim calendarIndex As Long
+    Dim hasIdentity As Boolean
+    Dim ignored As Boolean
+    Dim wbsValue As String
+    Dim taskTypeValue As String
+    Dim changed As Boolean
 
     Set perfScope = Profiler_BeginScope("NormalizeWBSCalendarValues", "Excel Cell Write")
 
@@ -1762,23 +2247,46 @@ Private Sub NormalizeWBSCalendarValues( _
     If mapWBS Is Nothing Then Exit Sub
     If Not mapWBS.Exists("Cal") Then Exit Sub
 
-    For r = 1 To tblWBS.ListRows.Count
-        Set cell = tblWBS.DataBodyRange.Cells(r, mapWBS("Cal"))
+    tableData = tblWBS.DataBodyRange.value
+    rowCount = tblWBS.ListRows.Count
+    idIndex = CLng(mapWBS("ID"))
+    wbsIndex = CLng(mapWBS("WBS"))
+    taskTypeIndex = CLng(mapWBS("Task Type"))
+    calendarIndex = CLng(mapWBS("Cal"))
+    ReDim outputValues(1 To rowCount, 1 To 1)
 
-        If Not WBSRowHasTaskIdentity(tblWBS, r, mapWBS) Then
-            If Trim$(CStr(cell.value)) <> "" Then cell.ClearContents
+    For r = 1 To rowCount
+        wbsValue = Replace$(Trim$(CStr(tableData(r, wbsIndex))), ",", ".")
+        hasIdentity = (Trim$(CStr(tableData(r, idIndex))) <> "" Or wbsValue <> "")
+
+        If Not hasIdentity Then
+            outputValues(r, 1) = Empty
+            If Trim$(CStr(tableData(r, calendarIndex))) <> "" Then changed = True
         Else
-            normalizedValue = NormalizeCalendarType(cell.value)
+            taskTypeValue = UCase$(NormalizeTaskTypeValue(tableData(r, taskTypeIndex)))
+            ignored = summaryWbsByWbs.Exists(wbsValue) _
+                Or taskTypeValue = "LEVEL OF EFFORT" _
+                Or taskTypeValue = "MILESTONE"
 
-            If Trim$(CStr(cell.value)) = "" Then
-                If Not IsCalendarIgnoredWBSRow(tblWBS, mapWBS, r, summaryWbsByWbs) Then
-                    cell.value = CALENDAR_7D
+            normalizedValue = NormalizeCalendarType(tableData(r, calendarIndex))
+            If Trim$(CStr(tableData(r, calendarIndex))) = "" Then
+                If ignored Then
+                    outputValues(r, 1) = Empty
+                Else
+                    outputValues(r, 1) = CALENDAR_7D
+                    changed = True
                 End If
-            ElseIf CStr(cell.value) <> normalizedValue Then
-                cell.value = normalizedValue
+            Else
+                outputValues(r, 1) = normalizedValue
+                If CStr(tableData(r, calendarIndex)) <> normalizedValue Then changed = True
             End If
         End If
     Next r
+
+    If changed Then
+        tblWBS.ListColumns("Cal").DataBodyRange.value = outputValues
+        Profiler_RecordOperation "DataSyncWbsCalendarBlockWrites", 1, 0#
+    End If
 
 End Sub
 '------------------------------------------------------------------------------
@@ -1846,17 +2354,17 @@ Private Sub DataSync_BuildMissingPredecessorMessages( _
     predWbsLine = DataSync_BuildMissingPredInline(missingRefs, "Pred WBS", 20)
 
     frText = _
-        "Prédécesseur introuvable" & vbCrLf & vbCrLf & _
-        "Les prédécesseurs suivants n'existent pas dans le planning." & vbCrLf & vbCrLf & _
+        "PrÃ©dÃ©cesseur introuvable" & vbCrLf & vbCrLf & _
+        "Les prÃ©dÃ©cesseurs suivants n'existent pas dans le planning." & vbCrLf & vbCrLf & _
         "IDs :" & vbCrLf & _
         idsLine & vbCrLf & vbCrLf & _
         "WBS :" & vbCrLf & _
         succWbsLine & vbCrLf & vbCrLf & _
-        "Prédécesseurs saisis :" & vbCrLf & _
+        "PrÃ©dÃ©cesseurs saisis :" & vbCrLf & _
         tokensLine & vbCrLf & vbCrLf & _
-        "WBS recherchées :" & vbCrLf & _
+        "WBS recherchÃ©es :" & vbCrLf & _
         predWbsLine & vbCrLf & vbCrLf & _
-        "-> créer les tâches manquantes ou corriger les liens."
+        "-> crÃ©er les tÃ¢ches manquantes ou corriger les liens."
 
     enText = _
         "Missing predecessor" & vbCrLf & vbCrLf & _

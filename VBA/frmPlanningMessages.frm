@@ -1,10 +1,10 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPlanningMessages 
    Caption         =   "Planning warnings"
-   ClientHeight    =   12840
+   ClientHeight    =   7800
    ClientLeft      =   930
    ClientTop       =   3705
-   ClientWidth     =   3.06870e5
+   ClientWidth     =   11400
    OleObjectBlob   =   "frmPlanningMessages.frx":0000
 End
 Attribute VB_Name = "frmPlanningMessages"
@@ -51,6 +51,17 @@ Public Sub LoadMessages( _
     ApplyFormLayout
     CenterFormOnExcel
     RenderCurrentMessage
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Force la creation/layout des controles avant que la fenetre devienne visible.
+' EN: Forces control creation/layout before the window becomes visible.
+'------------------------------------------------------------------------------
+
+Public Sub PrepareForImmediateShow()
+
+    Me.Repaint
 
 End Sub
 

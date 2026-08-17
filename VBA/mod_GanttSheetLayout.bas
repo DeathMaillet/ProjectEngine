@@ -58,6 +58,7 @@ Private Const GANTT_SCALE_MONTH As String = "MONTH"
 
 Private gPendingGanttGeometryRepair As Boolean
 Private gPendingGanttGeometrySnapshot As Object
+Private gTimelineActiveLastColumn As Long
 
 '------------------------------------------------------------------------------
 ' FR: Nettoie, restaure ou normalise une partie de l'etat visuel GANTT.
@@ -124,6 +125,7 @@ Public Sub Gantt_SafeEmptyState()
     Application.ScreenUpdating = False
 
     EnsureGanttViewInitialized
+    GanttRefresh_InvalidateDifferentialState "SafeEmptyState"
     Set wsGantt = EnsureGanttSheet(wasGanttSheetCreated)
 
     ClearGanttSheet wsGantt
@@ -164,6 +166,149 @@ Public Sub PrepareGanttDisplayOnlyLayout( _
     End If
 
     FinalizeGanttSheet_DisplayOnly wsGantt, totalDays, rowCount
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR:
+' Prepare uniquement la timeline d'un refresh differentiel sans effacer les
+' shapes, le panneau gauche ni les saisies TEST.
+'
+' EN:
+' Prepares only the timeline for a differential refresh without clearing
+' shapes, the left pane, or TEST inputs.
+'------------------------------------------------------------------------------
+Public Sub PrepareGanttDifferentialLayout( _
+    ByVal wsGantt As Worksheet, _
+    ByVal rowCount As Long, _
+    ByVal projectStart As Variant, _
+    ByVal totalDays As Long, _
+    ByVal rebuildTimeline As Boolean)
+
+    Dim lastExistingCol As Long
+    Dim oldActiveLastCol As Long
+    Dim newActiveLastCol As Long
+    Dim usedRangeLastCol As Long
+    Dim lastRenderedRow As Long
+
+    If wsGantt Is Nothing Then Exit Sub
+    If Not rebuildTimeline Then Exit Sub
+
+    lastExistingCol = wsGantt.cells(HEADER_ROW_2, wsGantt.columns.Count).End(xlToLeft).Column
+    If lastExistingCol < FIRST_TIMELINE_COL Then lastExistingCol = FIRST_TIMELINE_COL
+    oldActiveLastCol = gTimelineActiveLastColumn
+    If oldActiveLastCol < FIRST_TIMELINE_COL Then oldActiveLastCol = lastExistingCol
+    If lastExistingCol > oldActiveLastCol Then oldActiveLastCol = lastExistingCol
+    usedRangeLastCol = wsGantt.UsedRange.Column + wsGantt.UsedRange.columns.Count - 1
+    If usedRangeLastCol > oldActiveLastCol Then oldActiveLastCol = usedRangeLastCol
+    newActiveLastCol = FIRST_TIMELINE_COL + totalDays - 1
+
+    On Error Resume Next
+    wsGantt.Range( _
+        wsGantt.cells(HEADER_ROW_1, FIRST_TIMELINE_COL), _
+        wsGantt.cells(HEADER_ROW_1, oldActiveLastCol)).UnMerge
+    On Error GoTo 0
+
+    wsGantt.Range( _
+        wsGantt.cells(HEADER_ROW_1, FIRST_TIMELINE_COL), _
+        wsGantt.cells(HEADER_ROW_2, oldActiveLastCol)).ClearContents
+
+    lastRenderedRow = FIRST_TASK_ROW + rowCount - 1
+    If lastRenderedRow >= FIRST_TASK_ROW Then
+        With wsGantt.Range( _
+            wsGantt.cells(FIRST_TASK_ROW, FIRST_TIMELINE_COL), _
+            wsGantt.cells(lastRenderedRow, oldActiveLastCol))
+            .Interior.Pattern = xlNone
+            .Borders.LineStyle = xlNone
+        End With
+    End If
+
+    SetupTimelineLayout wsGantt, projectStart, totalDays
+    FinalizeGanttSheet_DisplayOnly wsGantt, totalDays, rowCount
+    If oldActiveLastCol > newActiveLastCol Then
+        ClearTimelineTailCanonical wsGantt, newActiveLastCol + 1, oldActiveLastCol, lastRenderedRow
+    End If
+
+    Profiler_RecordOperation "GanttDiffTimelineRebuilds", 1, 0#
+    Profiler_RecordOperation "GanttTimelineOldActiveColumns", oldActiveLastCol - FIRST_TIMELINE_COL + 1, 0#
+    Profiler_RecordOperation "GanttTimelineNewActiveColumns", totalDays, 0#
+
+End Sub
+
+Public Sub ClearTimelineTailCanonical( _
+    ByVal ws As Worksheet, _
+    ByVal firstTailCol As Long, _
+    ByVal lastTailCol As Long, _
+    ByVal lastRenderedRow As Long)
+
+    Dim perfScope As clsPerfScope
+    Dim clearLastRow As Long
+    Dim tailRange As Range
+
+    Set perfScope = Profiler_BeginScope("ClearTimelineTailCanonical", "Timeline")
+
+    If ws Is Nothing Then Exit Sub
+    If firstTailCol < FIRST_TIMELINE_COL Then firstTailCol = FIRST_TIMELINE_COL
+    If lastTailCol < firstTailCol Then Exit Sub
+
+    clearLastRow = lastRenderedRow
+    If ws.UsedRange.Row + ws.UsedRange.rows.Count - 1 > clearLastRow Then
+        clearLastRow = ws.UsedRange.Row + ws.UsedRange.rows.Count - 1
+    End If
+    If clearLastRow < HEADER_ROW_1 Then clearLastRow = HEADER_ROW_2
+
+    On Error Resume Next
+    ws.Range(ws.cells(HEADER_ROW_1, firstTailCol), ws.cells(HEADER_ROW_2, lastTailCol)).UnMerge
+    On Error GoTo 0
+
+    Set tailRange = ws.Range( _
+        ws.cells(HEADER_ROW_1, firstTailCol), _
+        ws.cells(clearLastRow, lastTailCol))
+
+    'Clear resets values, formulas, formatting, borders, and fill in one COM call.
+    tailRange.Clear
+    tailRange.EntireColumn.Hidden = False
+    tailRange.EntireColumn.ColumnWidth = ws.StandardWidth
+
+    Profiler_RecordOperation "GanttTimelineTailColumnsCleared", lastTailCol - firstTailCol + 1, 0#
+    Profiler_RecordOperation "GanttTimelineTailCellsCleared", tailRange.cells.CountLarge, 0#
+
+End Sub
+
+'------------------------------------------------------------------------------
+' Updates only the left-panel rows owned by a local Gantt transaction.
+'------------------------------------------------------------------------------
+Public Sub GanttLayout_UpdateAffectedLeftPanelRows( _
+    ByVal ws As Worksheet, _
+    ByRef dataArr As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal hasChildren As Object, _
+    ByVal calcDrivingMap As Object, _
+    ByVal affectedIds As Object, _
+    ByVal rowById As Object)
+
+    Dim idVal As Variant
+    Dim ganttRow As Long
+    Dim dataRow As Long
+    Dim updatedCount As Long
+
+    If ws Is Nothing Then Exit Sub
+    If affectedIds Is Nothing Then Exit Sub
+    If rowById Is Nothing Then Exit Sub
+
+    For Each idVal In affectedIds.keys
+        If rowById.Exists(CStr(idVal)) Then
+            ganttRow = CLng(rowById(CStr(idVal)))
+            dataRow = ganttRow - FIRST_TASK_ROW + 1
+            If dataRow >= 1 And dataRow <= UBound(dataArr, 1) Then
+                WriteLeftPanelRow ws, ganttRow, dataArr, dataRow, mapWBS
+                ApplyRowStyle ws, ganttRow, dataArr, dataRow, mapWBS, hasChildren, calcDrivingMap
+                updatedCount = updatedCount + 1
+            End If
+        End If
+    Next idVal
+
+    Profiler_RecordOperation "GanttLocalPanelRowsWritten", updatedCount, 0#
 
 End Sub
 
@@ -211,7 +356,7 @@ Public Sub PrepareGanttFullLayout( _
 
     applyLeftPanelDefaults = (isNewSheet Or IsGanttSheetLayoutEmpty(wsGantt))
 
-    ClearGanttSheet wsGantt
+    ClearGanttSheetRetainingShapes wsGantt
     SetupStaticLayout wsGantt
     If applyLeftPanelDefaults Then SetupLeftPanelDefaults wsGantt
     SetupTimelineLayout wsGantt, projectStart, totalDays
@@ -284,7 +429,7 @@ Public Sub Gantt_RepairPendingGeometryIfNeeded()
     Application.ScreenUpdating = False
     SetGanttInternalWrite True
 
-    For Each shapeName In gPendingGanttGeometrySnapshot.Keys
+    For Each shapeName In gPendingGanttGeometrySnapshot.keys
         Set shp = Nothing
         On Error Resume Next
         Set shp = ws.Shapes(CStr(shapeName))
@@ -360,6 +505,7 @@ Public Function IsGanttGeometryRepairShape(ByVal shapeName As String) As Boolean
         Or Left$(shapeName, 3) = "MS_" _
         Or Left$(shapeName, 4) = "SUM_" _
         Or Left$(shapeName, 4) = "DEP_" _
+        Or GanttDependencySvg_IsLayerName(shapeName) _
         Or Left$(shapeName, 5) = "CSTR_"
 
 End Function
@@ -383,6 +529,7 @@ Private Function IsManagedGanttShape(ByVal shapeName As String) As Boolean
         Or Left$(shapeName, 3) = "MS_" _
         Or Left$(shapeName, 5) = "TASK_" _
         Or Left$(shapeName, 4) = "DEP_" _
+        Or GanttDependencySvg_IsLayerName(shapeName) _
         Or Left$(shapeName, 5) = "CSTR_"
 
 End Function
@@ -421,7 +568,7 @@ Private Sub ClearGanttRightPaneOnly(ByVal wsGantt As Worksheet)
 
     Set perfScope = Profiler_BeginScope("ClearGanttRightPaneOnly", "Excel Clear")
 
-    lastCol = wsGantt.cells(HEADER_ROW_2, wsGantt.Columns.Count).End(xlToLeft).Column
+    lastCol = wsGantt.cells(HEADER_ROW_2, wsGantt.columns.Count).End(xlToLeft).Column
     If lastCol < FIRST_TIMELINE_COL Then lastCol = FIRST_TIMELINE_COL
 
     On Error Resume Next
@@ -446,7 +593,7 @@ Private Sub ClearGanttRightPaneOnly(ByVal wsGantt As Worksheet)
         wsGantt.cells(wsGantt.rows.Count, lastCol) _
     ).Borders.LineStyle = xlNone
 
-    DeleteManagedGanttShapes wsGantt
+    Profiler_RecordOperation "DeleteManagedGanttShapes_SkippedForRetainedFull", 1, 0#
 
 End Sub
 
@@ -568,15 +715,15 @@ End Sub
 '------------------------------------------------------------------------------
 Private Sub SetupLeftPanelDefaults(ByVal ws As Worksheet)
 
-    ws.Columns("A").ColumnWidth = 12
-    ws.Columns("B").ColumnWidth = 34
-    ws.Columns("C:F").ColumnWidth = 11
-    ws.Columns("G").ColumnWidth = 9
-    ws.Columns("H:I").ColumnWidth = 8
+    ws.columns("A").ColumnWidth = 12
+    ws.columns("B").ColumnWidth = 34
+    ws.columns("C:F").ColumnWidth = 11
+    ws.columns("G").ColumnWidth = 9
+    ws.columns("H:I").ColumnWidth = 8
 
     'Logic column calibrated to avoid text overflow into the timeline at 55% zoom.
     'Measured target: approx. 109 px / Excel width 14.86.
-    ws.Columns("J").ColumnWidth = 14.86
+    ws.columns("J").ColumnWidth = 14.86
 
 End Sub
 
@@ -613,6 +760,27 @@ Private Sub SetupTimelineLayout(ByVal ws As Worksheet, ByVal projectStart As Var
         Case Else
             BuildTimeline_Day ws, projectStart, slotCount
     End Select
+
+    If slotCount > 0 Then
+        gTimelineActiveLastColumn = FIRST_TIMELINE_COL + slotCount - 1
+    Else
+        gTimelineActiveLastColumn = FIRST_TIMELINE_COL
+    End If
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Nettoie les cellules sans supprimer les Shapes gerees par leurs owners.
+' EN: Clears cells without deleting Shapes owned by renderers/registries.
+'------------------------------------------------------------------------------
+Private Sub ClearGanttSheetRetainingShapes(ByVal ws As Worksheet)
+
+    Dim perfScope As clsPerfScope
+
+    Set perfScope = Profiler_BeginScope("ClearGanttSheetRetainingShapes", "Excel Clear")
+
+    ws.cells.ClearContents
+    ws.cells.ClearFormats
 
 End Sub
 

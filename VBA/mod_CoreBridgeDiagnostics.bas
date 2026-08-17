@@ -616,9 +616,15 @@ Public Sub CalcBridge_ShowPlanningConsole(ByVal messages As Collection)
     Dim historyMessages As Collection
     Dim displayMessages As Collection
     Dim historyErrorMessage As String
+    Dim prepScope As clsPerfScope
+    Dim showScope As clsPerfScope
 
     If messages Is Nothing Then Exit Sub
     If messages.Count = 0 Then Exit Sub
+
+    Profiler_RecordOperation "PlanningConsole_ENGINE_READY", 1, 0#
+    Profiler_RecordOperation "PlanningConsole_PREP_START", 1, 0#
+    Set prepScope = Profiler_BeginScope("PlanningConsole_PrepareBeforeShow", "Planning Console")
 
     Set historyMessages = MessageEngine_PrepareConsoleMessages(messages)
 
@@ -646,17 +652,28 @@ Public Sub CalcBridge_ShowPlanningConsole(ByVal messages As Collection)
     If Not CanCurrentWorkflowDisplay("CalcBridge_ShowPlanningConsole") Then Exit Sub
 
     If PlanningConsolePolicy_IsNonInteractive() Then
+        Set prepScope = Nothing
         RunButtonsTrace_Checkpoint "ConsolePolicy", "Planning console noninteractive capture start"
         PlanningConsolePolicy_CaptureDisplayMessages displayMessages, "Planning console"
         RunButtonsTrace_Checkpoint "ConsolePolicy", "Planning console noninteractive capture returned"
         Exit Sub
     End If
 
+    Load frmPlanningMessages
     RunButtonsTrace_Checkpoint "Console", "Planning console modal load start"
     frmPlanningMessages.LoadMessages displayMessages, "Planning console"
+    frmPlanningMessages.PrepareForImmediateShow
+    RunButtonsTrace_Checkpoint "Console", "Planning console ready before show"
+    Profiler_RecordOperation "PlanningConsole_PREP_END", 1, 0#
+    Set prepScope = Nothing
+
+    Profiler_RecordOperation "PlanningConsole_SHOW_START", 1, 0#
     RunButtonsTrace_Checkpoint "Console", "Planning console modal show start"
+    Set showScope = Profiler_BeginScope("PlanningConsole_ShowModalLifetime", "Planning Console")
     frmPlanningMessages.Show vbModal
+    Set showScope = Nothing
     RunButtonsTrace_Checkpoint "Console", "Planning console modal show returned"
+    Profiler_RecordOperation "PlanningConsole_SHOW_RETURN", 1, 0#
 
 End Sub
 

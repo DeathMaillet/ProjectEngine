@@ -523,6 +523,7 @@ Private Sub Toggle_CriticalPathMode_Core(ByVal refreshGanttAfterCalc As Boolean)
 
     SetCriticalPathModeVisualState enabledNext
     Refresh_CriticalPathMode_Toggle_Visual
+    GanttUiControls_RefreshCriticalPathMultiVisual ThisWorkbook.Worksheets("GANTT")
 
     ForceFullRecalcAfterCriticalPathModeChange
 
@@ -532,10 +533,13 @@ Private Sub Toggle_CriticalPathMode_Core(ByVal refreshGanttAfterCalc As Boolean)
     Run_Calc_Engine
 
     If refreshGanttAfterCalc Then
-        Refresh_Gantt
+        If Not CommitGanttUpdate(GANTT_DATA_SOURCE_NORMAL, GANTT_UPDATE_SCOPE_INCREMENTAL, GANTT_RENDER_INTENT_SHOW, "Toggle_CriticalPathMode") Then
+            Err.Raise 5, "Toggle_CriticalPathMode_Core", "Gantt render did not reach READY state after Critical Path mode change."
+        End If
     End If
 
     Refresh_CriticalPathMode_Toggle_Visual
+    GanttUiControls_RefreshCriticalPathMultiVisual ThisWorkbook.Worksheets("GANTT")
 
     Exit Sub
 

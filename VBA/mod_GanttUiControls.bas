@@ -455,6 +455,28 @@ Public Sub RefreshFixedHeaderToggleVisuals(ByVal ws As Worksheet)
 End Sub
 
 '------------------------------------------------------------------------------
+' FR: Finalise uniquement le toggle Single / Multiple du header GANTT.
+' EN: Finalizes only the GANTT header Single / Multiple toggle.
+'------------------------------------------------------------------------------
+Public Sub GanttUiControls_RefreshCriticalPathMultiVisual(ByVal ws As Worksheet)
+
+    If ws Is Nothing Then Exit Sub
+    RefreshFixedHeaderToggleVisual ws, BTN_CP_MULTI_BG_NAME, BTN_CP_MULTI_KNOB_NAME, IsCriticalPathMultiNetworkEnabled()
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Finalise uniquement le toggle Constraints du header GANTT.
+' EN: Finalizes only the GANTT header Constraints toggle.
+'------------------------------------------------------------------------------
+Public Sub GanttUiControls_RefreshConstraintVisual(ByVal ws As Worksheet)
+
+    If ws Is Nothing Then Exit Sub
+    RefreshFixedHeaderToggleVisual ws, BTN_CONSTRAINT_BG_NAME, BTN_CONSTRAINT_KNOB_NAME, GetGanttShowConstraints()
+
+End Sub
+
+'------------------------------------------------------------------------------
 ' FR: Met en forme ou met a jour un element UI/shape du GANTT.
 ' EN: Formats or updates a GANTT UI/shape element.
 '------------------------------------------------------------------------------

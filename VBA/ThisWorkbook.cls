@@ -24,10 +24,33 @@ Dim gAppEvents As clsAppEvents
 ' EN: Initializes events, settings, WBS buttons, and the Gantt watcher on workbook open.
 '------------------------------------------------------------------------------
 Private Sub Workbook_Open()
+    Dim sheetBefore As String
+    Dim startedAt As Double
+
+    GanttOpenLifecycle_BeginTrace "Workbook_Open"
+    sheetBefore = ThisWorkbook_ActiveSheetName()
+
+    startedAt = Timer
     Init_AppEvents
+    GanttOpenLifecycle_Record "Workbook_Open.Init_AppEvents", "", sheetBefore, ThisWorkbook_ActiveSheetName(), ThisWorkbook_MsSince(startedAt)
+
+    startedAt = Timer
     Settings_HydrateRuntimeState
+    GanttOpenLifecycle_Record "Workbook_Open.Settings_HydrateRuntimeState", "", ThisWorkbook_ActiveSheetName(), ThisWorkbook_ActiveSheetName(), ThisWorkbook_MsSince(startedAt)
+
+    startedAt = Timer
     Ensure_WBS_Main_Buttons
+    GanttOpenLifecycle_Record "Workbook_Open.Ensure_WBS_Main_Buttons", "", ThisWorkbook_ActiveSheetName(), ThisWorkbook_ActiveSheetName(), ThisWorkbook_MsSince(startedAt)
+
+    If UCase$(ThisWorkbook_ActiveSheetName()) = "GANTT" Then
+        StartGanttDragWatchIfActive
+        GanttColdState_MarkPending "Workbook_OpenGanttPassive"
+    Else
+        GanttColdState_MarkPending "Workbook_OpenNonGantt"
+    End If
+
     StartGanttDragWatchIfActive
+    GanttOpenLifecycle_Record "Workbook_Open.Complete", "", sheetBefore, ThisWorkbook_ActiveSheetName(), 0#
 End Sub
 
 '------------------------------------------------------------------------------
@@ -47,9 +70,11 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     Init_AppEvents
     If Not Sh Is Nothing Then
         If CStr(Sh.Name) = "GANTT" Then
-            Gantt_RepairPendingGeometryIfNeeded
-            GanttUiControls_EnsureCanonical Sh
-            GanttDrag_StartWatch
+            GanttDrag_EnsureArmed
+            If GanttDeferredRender_IsPending() Then
+                GanttDeferredRender_FinishIfPending "Workbook_SheetActivate"
+            End If
+            GanttDrag_EnsureArmed
         End If
     End If
 End Sub
@@ -92,13 +117,33 @@ Private Sub StartGanttDragWatchIfActive()
     If Not (Application.ActiveSheet.Parent Is Me) Then Exit Sub
     If CStr(Application.ActiveSheet.Name) <> "GANTT" Then Exit Sub
 
-    Gantt_RepairPendingGeometryIfNeeded
-    GanttUiControls_EnsureCanonical Application.ActiveSheet
-    GanttDrag_StartWatch
+    GanttDrag_EnsureArmed
 
 SafeExit:
 
 End Sub
+
+Private Function ThisWorkbook_ActiveSheetName() As String
+
+    On Error Resume Next
+    If Not Application.ActiveSheet Is Nothing Then
+        If Application.ActiveSheet.Parent Is Me Then
+            ThisWorkbook_ActiveSheetName = CStr(Application.ActiveSheet.Name)
+        End If
+    End If
+    On Error GoTo 0
+
+End Function
+
+Private Function ThisWorkbook_MsSince(ByVal startedAt As Double) As Double
+
+    Dim nowValue As Double
+
+    nowValue = Timer
+    If nowValue < startedAt Then nowValue = nowValue + 86400#
+    ThisWorkbook_MsSince = (nowValue - startedAt) * 1000#
+
+End Function
 
 '------------------------------------------------------------------------------
 ' FR: Initialise la valeur App Events et en prend une copie conforme au contrat du composant.

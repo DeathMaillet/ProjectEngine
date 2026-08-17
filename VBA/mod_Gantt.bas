@@ -13,7 +13,7 @@ Option Explicit
 ' Exposes historical Gantt wrappers and orchestrates the remaining high-level calls after decomposition.
 ' Must not bypass public contracts owned by other domains.
 '
-' CONTRATS / CONTRACTS : Refresh_Gantt, Refresh_Gantt_DisplayOnly, Gantt_TryApplyTestDayPredictiveRegistry
+' CONTRATS / CONTRACTS : CommitGanttUpdate compatibility wrappers, Gantt_TryApplyTestDayPredictiveRegistry
 ' CALLBACKS EXTERNES / EXTERNAL CALLBACKS : Aucun / None
 '===============================================================================
 
@@ -111,6 +111,345 @@ Private Const GANTT_ANALYTICS_PATH_LP As String = "LP"
 
 Private Const LINK_ANCHOR_START As String = "START"
 Private Const LINK_ANCHOR_FINISH As String = "FINISH"
+
+Private Const GANTT_COLD_STATE_PENDING As String = "PENDING"
+Private Const GANTT_COLD_STATE_READY As String = "READY"
+Private Const GANTT_COLD_STATE_UNKNOWN As String = "UNKNOWN"
+
+Public Const GANTT_ENSURE_NO_RENDER As String = "NO_RENDER"
+Public Const GANTT_ENSURE_RENDER_OFFSCREEN As String = "RENDER_OFFSCREEN"
+Public Const GANTT_ENSURE_RENDER_AND_SHOW As String = "RENDER_AND_SHOW"
+Public Const GANTT_ENSURE_ON_ACTIVATION As String = "ENSURE_ON_ACTIVATION"
+Public Const GANTT_ENSURE_LOCAL_UPDATE As String = "LOCAL_UPDATE"
+
+Private gGanttColdState As String
+Private gExplicitDeferredGanttRenderPending As Boolean
+Private gExplicitDeferredGanttRenderReason As String
+Private gOpenLifecycleTrace As Collection
+Private gOpenLifecycleStart As Double
+Private gOpenLifecycleSeq As Long
+
+Public Sub GanttOpenLifecycle_BeginTrace(ByVal scenarioName As String)
+
+    Set gOpenLifecycleTrace = New Collection
+    gOpenLifecycleSeq = 0
+    gOpenLifecycleStart = Timer
+    GanttOpenLifecycle_Record "Begin", scenarioName, GanttOpenLifecycle_ActiveSheetName(), GanttOpenLifecycle_ActiveSheetName(), 0#
+
+End Sub
+
+Public Sub GanttOpenLifecycle_Record( _
+    ByVal functionName As String, _
+    Optional ByVal reason As String = "", _
+    Optional ByVal sheetBefore As String = "", _
+    Optional ByVal sheetAfter As String = "", _
+    Optional ByVal elapsedMs As Double = 0#)
+
+    Dim rowData(1 To 7) As Variant
+
+    If gOpenLifecycleTrace Is Nothing Then Set gOpenLifecycleTrace = New Collection
+    gOpenLifecycleSeq = gOpenLifecycleSeq + 1
+    rowData(1) = gOpenLifecycleSeq
+    rowData(2) = functionName
+    rowData(3) = reason
+    rowData(4) = sheetBefore
+    rowData(5) = sheetAfter
+    rowData(6) = elapsedMs
+    rowData(7) = GanttOpenLifecycle_ElapsedMs()
+    gOpenLifecycleTrace.Add rowData
+
+End Sub
+
+Public Function GanttOpenLifecycle_ExportTrace(ByVal outputPath As String) As Boolean
+
+    Dim fso As Object
+    Dim stream As Object
+    Dim rowData As Variant
+
+    On Error GoTo Failed
+    If gOpenLifecycleTrace Is Nothing Then Exit Function
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set stream = fso.CreateTextFile(outputPath, True, False)
+    stream.WriteLine "Seq" & vbTab & "Function" & vbTab & "Reason" & vbTab & _
+        "SheetBefore" & vbTab & "SheetAfter" & vbTab & "ElapsedMs" & vbTab & "SinceTraceStartMs"
+    For Each rowData In gOpenLifecycleTrace
+        stream.WriteLine CStr(rowData(1)) & vbTab & CStr(rowData(2)) & vbTab & _
+            CStr(rowData(3)) & vbTab & CStr(rowData(4)) & vbTab & _
+            CStr(rowData(5)) & vbTab & CStr(rowData(6)) & vbTab & CStr(rowData(7))
+    Next rowData
+    stream.Close
+    GanttOpenLifecycle_ExportTrace = True
+    Exit Function
+
+Failed:
+    On Error Resume Next
+    If Not stream Is Nothing Then stream.Close
+    On Error GoTo 0
+
+End Function
+
+Public Sub GanttColdState_MarkPending(Optional ByVal reason As String = "")
+
+    gGanttColdState = GANTT_COLD_STATE_PENDING
+    GanttOpenLifecycle_Record "GanttColdState_MarkPending", reason, _
+        GanttOpenLifecycle_ActiveSheetName(), GanttOpenLifecycle_ActiveSheetName(), 0#
+
+End Sub
+
+Public Sub GanttDeferredRender_MarkPending(Optional ByVal reason As String = "")
+
+    gExplicitDeferredGanttRenderPending = True
+    gExplicitDeferredGanttRenderReason = reason
+    GanttColdState_MarkPending "ExplicitDeferredRender|" & reason
+    GanttOpenLifecycle_Record "GanttDeferredRender_MarkPending", reason, _
+        GanttOpenLifecycle_ActiveSheetName(), GanttOpenLifecycle_ActiveSheetName(), 0#
+
+End Sub
+
+Public Sub GanttDeferredRender_Clear(Optional ByVal reason As String = "")
+
+    gExplicitDeferredGanttRenderPending = False
+    gExplicitDeferredGanttRenderReason = vbNullString
+    GanttOpenLifecycle_Record "GanttDeferredRender_Clear", reason, _
+        GanttOpenLifecycle_ActiveSheetName(), GanttOpenLifecycle_ActiveSheetName(), 0#
+
+End Sub
+
+Public Function GanttDeferredRender_IsPending() As Boolean
+
+    GanttDeferredRender_IsPending = gExplicitDeferredGanttRenderPending
+
+End Function
+
+Public Function GanttDeferredRender_FinishIfPending(Optional ByVal reason As String = "") As Boolean
+
+    Dim pendingReason As String
+    Dim startedAt As Double
+
+    If Not gExplicitDeferredGanttRenderPending Then Exit Function
+
+    pendingReason = gExplicitDeferredGanttRenderReason
+    startedAt = Timer
+    GanttOpenLifecycle_Record "GanttDeferredRender_FinishIfPending", _
+        "Start|" & reason & "|" & pendingReason, _
+        GanttOpenLifecycle_ActiveSheetName(), GanttOpenLifecycle_ActiveSheetName(), 0#
+
+    If EnsureGanttForCurrentPlanning( _
+        GANTT_ENSURE_RENDER_OFFSCREEN, _
+        "ExplicitDeferredActivation|" & reason & "|" & pendingReason) Then
+        GanttDeferredRender_Clear "Completed|" & reason & "|" & pendingReason
+        GanttDeferredRender_FinishIfPending = True
+    End If
+
+    GanttOpenLifecycle_Record "GanttDeferredRender_FinishIfPending", _
+        "End|" & reason & "|Completed=" & CStr(GanttDeferredRender_FinishIfPending), _
+        GanttOpenLifecycle_ActiveSheetName(), GanttOpenLifecycle_ActiveSheetName(), _
+        GanttOpenLifecycle_MsSince(startedAt)
+
+End Function
+
+Public Function GanttColdState_Get() As String
+
+    If Len(gGanttColdState) = 0 Then
+        GanttColdState_Get = GANTT_COLD_STATE_UNKNOWN
+    Else
+        GanttColdState_Get = gGanttColdState
+    End If
+
+End Function
+
+Public Sub GanttColdState_EnsureReadyIfGanttActive(Optional ByVal reason As String = "")
+
+    Dim beforeSheet As String
+    Dim startedAt As Double
+
+    beforeSheet = GanttOpenLifecycle_ActiveSheetName()
+    startedAt = Timer
+
+    If UCase$(beforeSheet) <> GANTT_SHEET Then
+        If Len(gGanttColdState) = 0 Then gGanttColdState = GANTT_COLD_STATE_PENDING
+        GanttOpenLifecycle_Record "GanttColdState_EnsureReadyIfGanttActive", _
+            "SkippedNonGantt|" & reason, beforeSheet, GanttOpenLifecycle_ActiveSheetName(), _
+            GanttOpenLifecycle_MsSince(startedAt)
+        Exit Sub
+    End If
+
+    EnsureGanttForCurrentPlanning GANTT_ENSURE_ON_ACTIVATION, reason
+    GanttOpenLifecycle_Record "GanttColdState_EnsureReadyIfGanttActive", _
+        GanttColdState_Get() & "|" & reason, beforeSheet, GanttOpenLifecycle_ActiveSheetName(), _
+        GanttOpenLifecycle_MsSince(startedAt)
+
+End Sub
+
+Public Function EnsureGanttForCurrentPlanning( _
+    ByVal mode As String, _
+    Optional ByVal reason As String = "") As Boolean
+
+    Dim normalizedMode As String
+    Dim ws As Worksheet
+    Dim beforeSheet As String
+    Dim afterSheet As String
+    Dim startedAt As Double
+    Dim ready As Boolean
+
+    startedAt = Timer
+    beforeSheet = GanttOpenLifecycle_ActiveSheetName()
+    normalizedMode = UCase$(Trim$(mode))
+
+    On Error GoTo Failed
+
+    Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
+
+    Select Case normalizedMode
+        Case GANTT_ENSURE_NO_RENDER
+            ready = CommitGanttUpdate( _
+                GanttEngine_ActiveDataSource(), GANTT_UPDATE_SCOPE_DEFER, _
+                GANTT_RENDER_INTENT_DEFER, "EnsureNoRender|" & reason)
+            EnsureGanttForCurrentPlanning = ready
+
+        Case GANTT_ENSURE_RENDER_OFFSCREEN
+            ready = CommitGanttUpdate( _
+                GanttEngine_ActiveDataSource(), GANTT_UPDATE_SCOPE_PARTIAL, _
+                GANTT_RENDER_INTENT_OFFSCREEN, "EnsureRenderOffscreen|" & reason)
+            EnsureGanttForCurrentPlanning = ready
+
+        Case GANTT_ENSURE_RENDER_AND_SHOW
+            ready = CommitGanttUpdate( _
+                GanttEngine_ActiveDataSource(), GANTT_UPDATE_SCOPE_PARTIAL, _
+                GANTT_RENDER_INTENT_SHOW, "EnsureRenderAndShow|" & reason)
+            EnsureGanttForCurrentPlanning = ready
+
+        Case GANTT_ENSURE_ON_ACTIVATION
+            Gantt_RepairColdStartSvgIfNeeded
+            ready = Gantt_IsReadyStateValid()
+            EnsureGanttForCurrentPlanning = True
+
+        Case GANTT_ENSURE_LOCAL_UPDATE
+            ready = CommitGanttUpdate( _
+                GanttEngine_ActiveDataSource(), GANTT_UPDATE_SCOPE_PARTIAL, _
+                GANTT_RENDER_INTENT_SHOW, "EnsureLocalUpdate|" & reason)
+            EnsureGanttForCurrentPlanning = ready
+
+        Case Else
+            Err.Raise 5, "EnsureGanttForCurrentPlanning", "Unknown Gantt ensure mode: " & mode
+    End Select
+
+TraceExit:
+    afterSheet = GanttOpenLifecycle_ActiveSheetName()
+    GanttOpenLifecycle_Record "EnsureGanttForCurrentPlanning", _
+        normalizedMode & "|" & reason & "|Ready=" & CStr(ready), _
+        beforeSheet, afterSheet, GanttOpenLifecycle_MsSince(startedAt)
+    Exit Function
+
+Failed:
+    gGanttColdState = GANTT_COLD_STATE_PENDING
+    afterSheet = GanttOpenLifecycle_ActiveSheetName()
+    GanttOpenLifecycle_Record "EnsureGanttForCurrentPlanning", _
+        normalizedMode & "|" & reason & "|FAILED|Err=" & CStr(Err.Number), _
+        beforeSheet, afterSheet, GanttOpenLifecycle_MsSince(startedAt)
+    EnsureGanttForCurrentPlanning = False
+
+End Function
+
+Public Function Gantt_FinalizeReadyState(Optional ByVal reason As String = "") As Boolean
+
+    Dim ws As Worksheet
+    Dim startedAt As Double
+    Dim beforeSheet As String
+    Dim afterSheet As String
+    Dim diag As Variant
+
+    startedAt = Timer
+    beforeSheet = GanttOpenLifecycle_ActiveSheetName()
+
+    On Error GoTo Failed
+
+    Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
+    If ws Is Nothing Then GoTo Failed
+
+    diag = GanttDependencySvg_GetPersistentCacheDiagnostics(ws)
+    If Not Gantt_DependencyDiagnosticsAreReady(diag) Then GoTo Failed
+
+    gGanttColdState = GANTT_COLD_STATE_READY
+    afterSheet = GanttOpenLifecycle_ActiveSheetName()
+    GanttOpenLifecycle_Record "Gantt_FinalizeReadyState", _
+        "READY|" & reason & "|Routes=" & CStr(diag(1, 5)) & "|Segments=" & CStr(diag(1, 6)), _
+        beforeSheet, afterSheet, GanttOpenLifecycle_MsSince(startedAt)
+    Gantt_FinalizeReadyState = True
+    Exit Function
+
+Failed:
+    gGanttColdState = GANTT_COLD_STATE_PENDING
+    afterSheet = GanttOpenLifecycle_ActiveSheetName()
+    GanttOpenLifecycle_Record "Gantt_FinalizeReadyState", _
+        "PENDING|" & reason & "|Err=" & CStr(Err.Number), _
+        beforeSheet, afterSheet, GanttOpenLifecycle_MsSince(startedAt)
+
+End Function
+
+Public Function Gantt_IsReadyStateValid() As Boolean
+
+    Dim ws As Worksheet
+    Dim diag As Variant
+
+    On Error GoTo Failed
+
+    Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
+    diag = GanttDependencySvg_GetPersistentCacheDiagnostics(ws)
+
+    Gantt_IsReadyStateValid = Gantt_DependencyDiagnosticsAreReady(diag)
+    Exit Function
+
+Failed:
+    Gantt_IsReadyStateValid = False
+
+End Function
+
+Private Function Gantt_DependencyDiagnosticsAreReady(ByVal diag As Variant) As Boolean
+
+    If CBool(diag(1, 7)) Then Exit Function
+    If Not CBool(diag(1, 10)) Then Exit Function
+
+    If IsAggregatedScaleMode() Then
+        Gantt_DependencyDiagnosticsAreReady = True
+        Exit Function
+    End If
+
+    Gantt_DependencyDiagnosticsAreReady = _
+        CBool(diag(1, 2)) And _
+        CBool(diag(1, 3)) And _
+        CBool(diag(1, 4)) And _
+        (CLng(diag(1, 5)) > 0) And _
+        CBool(diag(1, 11))
+
+End Function
+
+Private Function GanttOpenLifecycle_ActiveSheetName() As String
+
+    On Error Resume Next
+    If Not Application.ActiveSheet Is Nothing Then
+        If Application.ActiveSheet.Parent Is ThisWorkbook Then
+            GanttOpenLifecycle_ActiveSheetName = CStr(Application.ActiveSheet.Name)
+        End If
+    End If
+    On Error GoTo 0
+
+End Function
+
+Private Function GanttOpenLifecycle_ElapsedMs() As Double
+    GanttOpenLifecycle_ElapsedMs = GanttOpenLifecycle_MsSince(gOpenLifecycleStart)
+End Function
+
+Private Function GanttOpenLifecycle_MsSince(ByVal startedAt As Double) As Double
+
+    Dim nowValue As Double
+
+    nowValue = Timer
+    If nowValue < startedAt Then nowValue = nowValue + 86400#
+    GanttOpenLifecycle_MsSince = (nowValue - startedAt) * 1000#
+
+End Function
 '------------------------------------------------------------------------------
 ' FR:
 ' Point d'entree public du redraw GANTT complet: lance le workflow de rendu
@@ -128,10 +467,10 @@ Private Const LINK_ANCHOR_FINISH As String = "FINISH"
 ' - Feuille GANTT reconstruite, timeline/shapes/liens/markers/UI mis a jour.
 '
 ' Appele par / Called by:
-' - Workflow Gantt, boutons, refresh production, refresh TEST/SCENARIO via GanttLive.
+' - Outils/harness historiques; le runtime produit doit appeler CommitGanttUpdate.
 '
 ' Notes:
-' - Wrapper stable autour de RunGanttRefreshCore; ne contient pas de logique CALC.
+' - Wrapper de compatibilite strict: ne rend pas directement et passe par CommitGanttUpdate.
 '------------------------------------------------------------------------------
 Public Sub Refresh_Gantt(Optional ByVal isNewSheet As Boolean = False, Optional ByVal activateGantt As Boolean = True)
 
@@ -139,7 +478,11 @@ Public Sub Refresh_Gantt(Optional ByVal isNewSheet As Boolean = False, Optional 
 
     Set perfScope = Profiler_BeginScope("Refresh_Gantt", "Workflow")
 
-    RunGanttRefreshCore False, isNewSheet, activateGantt
+    CommitGanttUpdate _
+        GanttEngine_ActiveDataSource(), _
+        GANTT_UPDATE_SCOPE_FULL, _
+        GANTT_RENDER_INTENT_SHOW, _
+        "Refresh_Gantt_CompatibilityWrapper"
 
 End Sub
 
@@ -149,14 +492,54 @@ End Sub
 '------------------------------------------------------------------------------
 Public Sub Refresh_Gantt_DisplayOnly()
 
-    RunGanttRefreshCore True, False, True
+    CommitGanttUpdate _
+        GanttEngine_ActiveDataSource(), _
+        GANTT_UPDATE_SCOPE_PARTIAL, _
+        GANTT_RENDER_INTENT_OFFSCREEN, _
+        "Refresh_Gantt_DisplayOnly_CompatibilityWrapper"
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Reprojette la timeline et la geometrie sans reconstruire le moteur.
+' EN: Reprojects timeline and geometry without rebuilding the engine.
+'------------------------------------------------------------------------------
+Public Sub Refresh_Gantt_TimelineOnly()
+
+    CommitGanttUpdate _
+        GanttEngine_ActiveDataSource(), _
+        GANTT_UPDATE_SCOPE_FULL, _
+        GANTT_RENDER_INTENT_SHOW, _
+        "Refresh_Gantt_TimelineOnly_CompatibilityWrapper"
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Repare une couche SVG persistante dont les routes memoire ne sont pas prouvees.
+' EN: Repairs a persisted SVG layer whose in-memory routes are not proven.
+'------------------------------------------------------------------------------
+Public Sub Gantt_RepairColdStartSvgIfNeeded()
+
+    Dim ws As Worksheet
+
+    On Error GoTo SafeExit
+
+    Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
+    If ws Is Nothing Then Exit Sub
+
+    If GanttDependencySvg_HasLayer(ws) And Not GanttDependencySvg_HasRoutes() Then
+        If GanttDependencySvg_TryHydratePersistentCache(ws) Then Exit Sub
+        GanttColdState_MarkPending "ColdStartSvgLayerWithoutRoutes"
+    End If
+
+SafeExit:
+    On Error GoTo 0
 
 End Sub
 '=====================================================
 ' Predictive TEST Day registry - phase 1
 ' Scope: TODAY_LINE, TASK_*, TASK_*_P, MS_* only.
-' Falls back to the classic Refresh_Gantt path whenever another visual family
-' could become stale.
+' Delegates to the common engine whenever another visual family could become stale.
 '=====================================================
 '------------------------------------------------------------------------------
 ' FR:
@@ -182,389 +565,26 @@ End Sub
 Public Function Gantt_TryApplyTestDayPredictiveRegistry() As Boolean
 
     Dim perfScope As clsPerfScope
-    Dim wsWBS As Worksheet
-    Dim wsGantt As Worksheet
-    Dim tblWBS As ListObject
-    Dim dataArr As Variant
-    Dim mapWBS As Object
-    Dim hasChildren As Object
-    Dim baseById As Object
-    Dim testById As Object
-    Dim projectStart As Variant
-    Dim projectFinish As Variant
-    Dim totalDays As Long
-    Dim rowCount As Long
-    Dim expected As Object
-    Dim existing As Object
-    Dim diffCount As Long
-    Dim fallbackReason As String
 
     Set perfScope = Profiler_BeginScope("GanttPredictiveRegistry_TryApplyTestDay", "Gantt Registry")
 
-    On Error GoTo Fallback
+    On Error GoTo Failed
 
-    Gantt_TryApplyTestDayPredictiveRegistry = False
-
-    EnsureGanttViewInitialized
-
-    If GetGanttTimelineScaleMode() <> GANTT_SCALE_DAY Then fallbackReason = "ScaleNotDay": GoTo Fallback
-    If GetGanttViewMode() <> GANTT_VIEW_DETAIL Then fallbackReason = "ViewNotDetail": GoTo Fallback
-    If Not GanttLive_IsTestRenderRequested() Then fallbackReason = "NoTestRenderRequest": GoTo Fallback
-
-    Set wsGantt = ThisWorkbook.Worksheets(GANTT_SHEET)
-    If wsGantt Is Nothing Then fallbackReason = "NoGanttSheet": GoTo Fallback
-    If IsGanttSheetLayoutEmpty(wsGantt) Then fallbackReason = "EmptyLayout": GoTo Fallback
-
-    Set wsWBS = ThisWorkbook.Worksheets(WBS_SHEET)
-    Set tblWBS = wsWBS.ListObjects(WBS_TABLE)
-    If tblWBS.DataBodyRange Is Nothing Then fallbackReason = "EmptyWBS": GoTo Fallback
-
-    Set mapWBS = CanonicalIdentity_BuildColumnMap(tblWBS)
-    ValidateGanttSourceColumns mapWBS
-
-    dataArr = tblWBS.DataBodyRange.Value
-    rowCount = UBound(dataArr, 1)
-    If rowCount < 1 Then fallbackReason = "NoRows": GoTo Fallback
-    If GetLastRenderedGanttRow(wsGantt) <> FIRST_TASK_ROW + rowCount - 1 Then fallbackReason = "RowCountMismatch": GoTo Fallback
-
-    Set hasChildren = GanttHierarchy_BuildDirectParentPresenceFromWbs(dataArr, mapWBS)
-    Set baseById = GanttLive_BuildBaseByIdMap()
-    Set testById = GanttLive_BuildTestByIdMap()
-
-    If GanttPredictive_HasUnsupportedSummaryDelta(dataArr, mapWBS, hasChildren, baseById, testById) Then fallbackReason = "SummaryDelta": GoTo Fallback
-
-    ResolveDisplayedProjectRange dataArr, mapWBS, hasChildren, baseById, testById, True, projectStart, projectFinish
-    If Not HasValue(projectStart) Or Not HasValue(projectFinish) Then fallbackReason = "NoProjectRange": GoTo Fallback
-
-    totalDays = GetTimelineSlotCount(projectStart, projectFinish)
-    If totalDays < 1 Then fallbackReason = "NoTimelineSlots": GoTo Fallback
-    If Not GanttPredictive_CurrentDayTimelineMatches(wsGantt, projectStart, projectFinish, totalDays) Then fallbackReason = "TimelineMismatch": GoTo Fallback
-
-    Set expected = GanttPredictive_BuildExpectedRegistry(wsGantt, dataArr, mapWBS, hasChildren, projectStart, totalDays, baseById, testById)
-    Set existing = GanttPredictive_BuildExistingRegistry(wsGantt)
-
-    diffCount = GanttPredictive_CountDiffs(expected, existing)
-    Profiler_RecordOperation "GanttPredictiveRegistryDiffs", diffCount, 0#
-
-    If diffCount > 0 Then
-        If GanttPredictive_HasExistingPrefix(existing, "DEP_") Then fallbackReason = "DependencyShapesPresent": GoTo Fallback
-        If GanttPredictive_HasExistingPrefix(existing, "CSTR_") Then fallbackReason = "ConstraintShapesPresent": GoTo Fallback
-        If GetGanttShowConstraints() Then fallbackReason = "ConstraintsEnabled": GoTo Fallback
-    End If
-
-    GanttPredictive_ApplyDiff wsGantt, expected, existing
-    ApplyGanttUiState wsGantt, False
-    Gantt_CapturePendingGeometryRepair wsGantt
-
-    If IsPlanningWorkflowActive() Then
-        If GanttDrag_IsWatching() Then GanttDrag_RebuildWatchMaps
-    Else
-        On Error Resume Next
-        GanttDrag_ReconcileWatchState
-        On Error GoTo 0
-    End If
-
+    'The former implementation built a global expected registry and only then
+    'rejected dependency shapes. The differential refresh now decides and
+    'applies the local transaction before any global shape scan.
+    If Not CommitGanttUpdate( _
+        GanttEngine_ActiveDataSource(), _
+        GANTT_UPDATE_SCOPE_PARTIAL, _
+        GANTT_RENDER_INTENT_SHOW, _
+        "GanttPredictiveRegistry_Compatibility") Then GoTo Failed
+    Profiler_RecordOperation "GanttPredictiveDelegatedToLocalTransaction", 1, 0#
     Gantt_TryApplyTestDayPredictiveRegistry = True
     Exit Function
 
-Fallback:
-    If fallbackReason = "" Then fallbackReason = "ErrorOrUnsupported"
-    Profiler_RecordOperation "GanttPredictiveRegistryFallback_" & fallbackReason, 1, 0#
+Failed:
+    Profiler_RecordOperation "GanttPredictiveRegistryFallback_LocalError", 1, 0#
     Gantt_TryApplyTestDayPredictiveRegistry = False
 
 End Function
 
-'------------------------------------------------------------------------------
-' FR: Participe au registre de shapes utilise pour creer, comparer ou mettre a jour le rendu predictif GANTT.
-' EN: Participates in the shape registry used to create, compare, or update predictive GANTT rendering.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_CurrentDayTimelineMatches( _
-    ByVal ws As Worksheet, _
-    ByVal projectStart As Variant, _
-    ByVal projectFinish As Variant, _
-    ByVal totalDays As Long) As Boolean
-
-    Dim firstVal As Variant
-    Dim lastVal As Variant
-    Dim lastCol As Long
-
-    On Error GoTo SafeExit
-
-    lastCol = FIRST_TIMELINE_COL + totalDays - 1
-    firstVal = ws.Cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Value
-    lastVal = ws.Cells(HEADER_ROW_2, lastCol).Value
-
-    If Not HasValue(firstVal) Then GoTo SafeExit
-    If Not HasValue(lastVal) Then GoTo SafeExit
-
-    GanttPredictive_CurrentDayTimelineMatches = _
-        (CLng(CDbl(firstVal)) = CLng(CDbl(projectStart))) And _
-        (CLng(CDbl(lastVal)) = CLng(CDbl(projectFinish)))
-
-SafeExit:
-End Function
-
-'------------------------------------------------------------------------------
-' FR: Participe au registre de shapes utilise pour creer, comparer ou mettre a jour le rendu predictif GANTT.
-' EN: Participates in the shape registry used to create, compare, or update predictive GANTT rendering.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_HasUnsupportedSummaryDelta( _
-    ByRef dataArr As Variant, _
-    ByVal mapWBS As Object, _
-    ByVal hasChildren As Object, _
-    ByVal baseById As Object, _
-    ByVal testById As Object) As Boolean
-
-    Dim r As Long
-    Dim wbsVal As String
-    Dim idVal As String
-
-    For r = 1 To UBound(dataArr, 1)
-        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
-        If hasChildren.Exists(wbsVal) Then
-            idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
-            If GanttLive_HasRenderableTestDelta(idVal, baseById, testById) Then
-                GanttPredictive_HasUnsupportedSummaryDelta = True
-                Exit Function
-            End If
-        End If
-    Next r
-
-End Function
-
-'------------------------------------------------------------------------------
-' FR:
-' Reconstruit en memoire le registre attendu des shapes TEST Day sans toucher la feuille.
-'
-' EN:
-' Rebuilds in memory the expected TEST Day shape registry without touching the sheet.
-'
-' Entrees / Inputs:
-' - Feuille GANTT, data WBS, maps, timeline Day, maps base/test.
-'
-' Sorties / Outputs:
-' - Dictionnaire de records attendus pour TASK/MS/TODAY.
-'
-' Appele par / Called by:
-' - Gantt_TryApplyTestDayPredictiveRegistry.
-'
-' Notes:
-' - Ignore les summaries: un delta summary force le fallback complet.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_BuildExpectedRegistry( _
-    ByVal ws As Worksheet, _
-    ByRef dataArr As Variant, _
-    ByVal mapWBS As Object, _
-    ByVal hasChildren As Object, _
-    ByVal projectStart As Variant, _
-    ByVal totalDays As Long, _
-    ByVal baseById As Object, _
-    ByVal testById As Object) As Object
-
-    Dim perfScope As clsPerfScope
-    Dim expected As Object
-    Dim parentCompleteMap As Object
-    Dim r As Long
-    Dim rowCount As Long
-    Dim ganttRow As Long
-    Dim wbsVal As String
-    Dim idVal As String
-    Dim rawStartVal As Variant
-    Dim rawFinishVal As Variant
-    Dim renderStartVal As Variant
-    Dim renderFinishVal As Variant
-    Dim rawDurationDays As Long
-    Dim progressVal As Double
-    Dim isCritical As Boolean
-    Dim hasDelta As Boolean
-    Dim isParent As Boolean
-    Dim isLoE As Boolean
-    Dim isMilestone As Boolean
-
-    Set perfScope = Profiler_BeginScope("GanttPredictiveRegistry_BuildExpected", "Gantt Registry")
-    Set expected = CreateObject("Scripting.Dictionary")
-    Set parentCompleteMap = GanttHierarchy_BuildLeafCompletionByAncestor(dataArr, mapWBS)
-
-    rowCount = UBound(dataArr, 1)
-
-    For r = 1 To rowCount
-        ganttRow = FIRST_TASK_ROW + r - 1
-        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
-
-        rawStartVal = GanttLive_GetDisplayStart(idVal, baseById, testById, True)
-        rawFinishVal = GanttLive_GetDisplayFinish(idVal, baseById, testById, True)
-        renderStartVal = GetRenderStartForCurrentScale(rawStartVal)
-        renderFinishVal = GetRenderFinishForCurrentScale(rawFinishVal)
-
-        isParent = hasChildren.Exists(wbsVal)
-        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
-        isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r)
-
-        If isParent Then GoTo NextShape
-        If Not ShouldRenderTaskInCurrentView(isParent, renderStartVal, renderFinishVal) Then GoTo NextShape
-        If Not HasValue(rawStartVal) Or Not HasValue(rawFinishVal) Then GoTo NextShape
-        If Not HasValue(renderStartVal) Or Not HasValue(renderFinishVal) Then GoTo NextShape
-
-        rawDurationDays = CLng(CDbl(rawFinishVal) - CDbl(rawStartVal) + 1)
-        progressVal = 0#
-
-        If isLoE Then
-            progressVal = GetLoEProgressFromToday(rawStartVal, rawFinishVal)
-        ElseIf HasValue(GanttLive_GetDisplayProgress(idVal, baseById, testById, True)) Then
-            progressVal = CDbl(GanttLive_GetDisplayProgress(idVal, baseById, testById, True))
-        End If
-
-        isCritical = ShouldHighlightGanttAnalyticsPath(dataArr, mapWBS, r, idVal, testById, True)
-        hasDelta = GanttLive_HasRenderableTestDelta(idVal, baseById, testById)
-
-        If isMilestone Then
-            GanttShapeRegistry_AddMilestoneRecord expected, ws, ganttRow, projectStart, rawStartVal, progressVal, isCritical, "MS_" & CStr(r), hasDelta
-        ElseIf ShouldDrawCompactTaskMarker(ws, ganttRow, projectStart, rawStartVal, rawFinishVal, rawDurationDays, isLoE) Then
-            GanttShapeRegistry_AddCompactTaskRecords expected, ws, ganttRow, projectStart, rawStartVal, rawFinishVal, progressVal, isCritical, "TASK_" & CStr(r), hasDelta
-        Else
-            GanttShapeRegistry_AddTaskBarRecords expected, ws, ganttRow, projectStart, rawStartVal, rawFinishVal, progressVal, isCritical, "TASK_" & CStr(r), hasDelta, isLoE
-        End If
-
-NextShape:
-    Next r
-
-    GanttShapeRegistry_AddTodayLineRecord expected, ws, projectStart, totalDays, rowCount
-    Set GanttPredictive_BuildExpectedRegistry = expected
-
-End Function
-
-'------------------------------------------------------------------------------
-' FR: Participe au registre de shapes utilise pour creer, comparer ou mettre a jour le rendu predictif GANTT.
-' EN: Participates in the shape registry used to create, compare, or update predictive GANTT rendering.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_BuildExistingRegistry(ByVal ws As Worksheet) As Object
-
-    Dim perfScope As clsPerfScope
-    Dim d As Object
-    Dim shp As Shape
-
-    Set perfScope = Profiler_BeginScope("GanttPredictiveRegistry_BuildExisting", "Gantt Registry")
-    Set d = CreateObject("Scripting.Dictionary")
-
-    For Each shp In ws.Shapes
-        If IsGanttGeometryRepairShape(shp.Name) Then d.Add shp.Name, shp
-    Next shp
-
-    Set GanttPredictive_BuildExistingRegistry = d
-
-End Function
-'------------------------------------------------------------------------------
-' FR: Participe au registre de shapes utilise pour creer, comparer ou mettre a jour le rendu predictif GANTT.
-' EN: Participates in the shape registry used to create, compare, or update predictive GANTT rendering.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_CountDiffs(ByVal expected As Object, ByVal existing As Object) As Long
-
-    Dim key As Variant
-    Dim shp As Shape
-    Dim rec As Object
-    Dim countVal As Long
-
-    For Each key In expected.Keys
-        Set rec = expected(CStr(key))
-        If Not existing.Exists(CStr(key)) Then
-            countVal = countVal + 1
-        Else
-            Set shp = existing(CStr(key))
-            If GanttShapeRegistry_ShapeDiffers(shp, rec) Then countVal = countVal + 1
-        End If
-    Next key
-
-    For Each key In existing.Keys
-        If GanttPredictive_IsScopedShapeName(CStr(key)) Then
-            If Not expected.Exists(CStr(key)) Then countVal = countVal + 1
-        End If
-    Next key
-
-    GanttPredictive_CountDiffs = countVal
-
-End Function
-
-'------------------------------------------------------------------------------
-' FR: Actualise Gantt Predictive Apply Diff sans modifier les regles metier qui produisent les donnees.
-' EN: Refreshes Gantt Predictive Apply Diff without changing the business rules that produce the data.
-' FR - Effet de bord : efface uniquement les donnees ou objets cibles du contrat.
-' EN - Side effect: clears only data or objects targeted by the contract.
-'------------------------------------------------------------------------------
-
-Private Sub GanttPredictive_ApplyDiff(ByVal ws As Worksheet, ByVal expected As Object, ByVal existing As Object)
-
-    Dim perfScope As clsPerfScope
-    Dim key As Variant
-    Dim rec As Object
-    Dim shp As Shape
-    Dim createdCount As Long
-    Dim updatedCount As Long
-    Dim deletedCount As Long
-
-    Set perfScope = Profiler_BeginScope("GanttPredictiveRegistry_ApplyDiff", "Gantt Registry")
-
-    For Each key In expected.Keys
-        Set rec = expected(CStr(key))
-        If existing.Exists(CStr(key)) Then
-            Set shp = existing(CStr(key))
-            If GanttShapeRegistry_ShapeDiffers(shp, rec) Then
-                If GanttShapeRegistry_TypeMismatch(shp, rec) Then
-                    shp.Delete
-                    GanttShapeRegistry_CreateShapeFromRecord ws, rec
-                    createdCount = createdCount + 1
-                Else
-                    GanttShapeRegistry_UpdateShapeFromRecord shp, rec
-                    updatedCount = updatedCount + 1
-                End If
-            End If
-        Else
-            GanttShapeRegistry_CreateShapeFromRecord ws, rec
-            createdCount = createdCount + 1
-        End If
-    Next key
-
-    For Each key In existing.Keys
-        If GanttPredictive_IsScopedShapeName(CStr(key)) Then
-            If Not expected.Exists(CStr(key)) Then
-                Set shp = existing(CStr(key))
-                shp.Delete
-                deletedCount = deletedCount + 1
-            End If
-        End If
-    Next key
-
-    Profiler_RecordOperation "GanttPredictiveRegistryCreates", createdCount, 0#
-    Profiler_RecordOperation "GanttPredictiveRegistryUpdates", updatedCount, 0#
-    Profiler_RecordOperation "GanttPredictiveRegistryDeletes", deletedCount, 0#
-
-End Sub
-'------------------------------------------------------------------------------
-' FR: Participe au registre de shapes utilise pour creer, comparer ou mettre a jour le rendu predictif GANTT.
-' EN: Participates in the shape registry used to create, compare, or update predictive GANTT rendering.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_IsScopedShapeName(ByVal shapeName As String) As Boolean
-
-    GanttPredictive_IsScopedShapeName = _
-        (shapeName = "TODAY_LINE") Or _
-        (Left$(shapeName, 5) = "TASK_") Or _
-        (Left$(shapeName, 3) = "MS_")
-
-End Function
-
-'------------------------------------------------------------------------------
-' FR: Participe au registre de shapes utilise pour creer, comparer ou mettre a jour le rendu predictif GANTT.
-' EN: Participates in the shape registry used to create, compare, or update predictive GANTT rendering.
-'------------------------------------------------------------------------------
-Private Function GanttPredictive_HasExistingPrefix(ByVal existing As Object, ByVal prefixText As String) As Boolean
-
-    Dim key As Variant
-
-    For Each key In existing.Keys
-        If Left$(CStr(key), Len(prefixText)) = prefixText Then
-            GanttPredictive_HasExistingPrefix = True
-            Exit Function
-        End If
-    Next key
-
-End Function

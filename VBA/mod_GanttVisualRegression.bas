@@ -657,7 +657,7 @@ End Function
 Private Function GanttVR_ShouldCaptureShapeText(ByVal shapeName As String) As Boolean
 
     Select Case GanttVR_ShapeFamily(shapeName)
-        Case "DEPENDENCY", "CONSTRAINT", "TODAY_LINE"
+        Case "DEPENDENCY", "DEPENDENCY_SVG", "CONSTRAINT", "TODAY_LINE"
             GanttVR_ShouldCaptureShapeText = False
         Case Else
             GanttVR_ShouldCaptureShapeText = True
@@ -918,6 +918,8 @@ Private Function GanttVR_ShapeFamily(ByVal shapeName As String) As String
         GanttVR_ShapeFamily = "SUMMARY"
     ElseIf Left$(shapeName, 4) = "DEP_" Then
         GanttVR_ShapeFamily = "DEPENDENCY"
+    ElseIf GanttDependencySvg_IsLayerName(shapeName) Then
+        GanttVR_ShapeFamily = "DEPENDENCY_SVG"
     ElseIf Left$(shapeName, 5) = "CSTR_" Then
         GanttVR_ShapeFamily = "CONSTRAINT"
     ElseIf InStr(1, shapeName, "Gantt", vbTextCompare) > 0 Or InStr(1, shapeName, "GANTT", vbTextCompare) > 0 Then
@@ -945,6 +947,8 @@ Private Function GanttVR_IsImportantShapeName(ByVal shapeName As String) As Bool
         Case Left$(shapeName, 4) = "SUM_"
             GanttVR_IsImportantShapeName = True
         Case Left$(shapeName, 4) = "DEP_"
+            GanttVR_IsImportantShapeName = True
+        Case GanttDependencySvg_IsLayerName(shapeName)
             GanttVR_IsImportantShapeName = True
         Case Left$(shapeName, 5) = "CSTR_"
             GanttVR_IsImportantShapeName = True

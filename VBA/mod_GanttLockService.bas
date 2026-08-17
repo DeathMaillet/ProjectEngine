@@ -746,9 +746,11 @@ Private Sub GanttLive_FinalizeSuccessfulLock( _
     GanttLive_ClearTestRenderRequest
     GanttLive_ClearActiveSimulationMode
     SetGanttPreserveTestInputs False
-    GanttLockTrace_Log "Finalize helper: Refresh_Gantt start"
-    Refresh_Gantt
-    GanttLockTrace_Log "Finalize helper: Refresh_Gantt returned"
+    GanttLockTrace_Log "Finalize helper: Ensure LOCAL_UPDATE start"
+    If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_LOCAL_UPDATE, "GanttLock_FinalizeAppliedChanges") Then
+        Err.Raise 5, "GanttLock_FinalizeAppliedChanges", "Gantt LOCK render did not reach READY state."
+    End If
+    GanttLockTrace_Log "Finalize helper: Ensure LOCAL_UPDATE returned"
 
 End Sub
 
@@ -867,3 +869,5 @@ Private Function LockResultsMatchSimulatedResult( _
     LockResultsMatchSimulatedResult = True
 
 End Function
+
+

@@ -219,7 +219,7 @@ Private Function GetCalcHeaders() As Variant
         "Forecast Start", "Forecast Finish", "Deadline", "Calculated Start", "Calculated Finish", "Calculated Duration", _
         "Driving Logic", "Constraint Active", "Start Constraint Type", "Start Constraint Date", _
         "Finish Constraint Type", "Finish Constraint Date", "Error flag", "ErrorMsg", "Critical Path", "Longest Path", "Total Float", "Free Float", "Deadline Float", _
-        "Critical Path REX", "Total Float REX", "Free Float REX" _
+        "Critical Path REX", "Longest Path REX", "Total Float REX", "Free Float REX" _
     )
 
     GetCalcHeaders = arr
@@ -287,6 +287,7 @@ Private Function Create_tbl_CALC(ByVal wsCalc As Worksheet) As ListObject
         "Free Float", _
         "Deadline Float", _
         "Critical Path REX", _
+        "Longest Path REX", _
         "Total Float REX", _
         "Free Float REX" _
     )
@@ -388,6 +389,7 @@ Private Sub Apply_tbl_CALC_ColumnFormats(ByVal tblCalc As ListObject)
     tblCalc.ListColumns("Critical Path").Range.NumberFormat = "@"
     tblCalc.ListColumns("Longest Path").Range.NumberFormat = "@"
     tblCalc.ListColumns("Critical Path REX").Range.NumberFormat = "@"
+    tblCalc.ListColumns("Longest Path REX").Range.NumberFormat = "@"
     tblCalc.ListColumns("IsSummary").Range.NumberFormat = "@"
     tblCalc.ListColumns("S").Range.NumberFormat = "@"
 

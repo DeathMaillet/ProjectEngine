@@ -223,7 +223,10 @@ End Sub
 ' FR: Lance le workflow Analytics Only.
 ' EN: Runs the Analytics Only workflow.
 '------------------------------------------------------------------------------
-Public Sub Run_Analytics_Only(Optional ByVal consoleMessages As Collection = Nothing)
+Public Sub Run_Analytics_Only( _
+    Optional ByVal consoleMessages As Collection = Nothing, _
+    Optional ByVal executionNetwork As clsCompiledExecutionNetwork = Nothing, _
+    Optional ByVal sharedLinksBySuccId As Object = Nothing)
 
     Dim perfScope As clsPerfScope
 
@@ -260,9 +263,13 @@ Public Sub Run_Analytics_Only(Optional ByVal consoleMessages As Collection = Not
     End If
 
     Set mapCalc = CanonicalIdentity_BuildColumnMap(tblCalc)
-    Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded(tblCalc)
+    If sharedLinksBySuccId Is Nothing Then
+        Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded(tblCalc)
+    Else
+        Set linksBySuccId = sharedLinksBySuccId
+    End If
 
-    CalcBridge_RunAnalyticsAndPush tblCalc, mapCalc, linksBySuccId, localConsole
+    CalcBridge_RunAnalyticsAndPush tblCalc, mapCalc, linksBySuccId, localConsole, executionNetwork
     If AnalyticsOnly_TableHasNegativeFloat(tblCalc, mapCalc) Then
         CalcBridge_AddConsoleMessage localConsole, "WARNING", AnalyticsOnly_NegativeFloatWarningMessage()
     End If

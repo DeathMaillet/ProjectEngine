@@ -47,7 +47,24 @@ Private Const LINK_EDGE_PADDING As Double = 8
 Private Const LINK_ANCHOR_START As String = "START"
 Private Const LINK_ANCHOR_FINISH As String = "FINISH"
 
+Private gExpectedDependencySegments As Object
+Private gExistingDependencySegments As Object
+Private gDependencyForceCreate As Boolean
+Private gDependencyCreates As Long
+Private gDependencyUpdates As Long
+Private gDependencyDeletes As Long
+Private gDependencyInspections As Long
+
 Private gExpandedLinks As Object
+Private gLinkSpecsByPrefix As Object
+Private gIncomingLinksByTask As Object
+Private gOutgoingLinksByTask As Object
+Private gSegmentsByLink As Object
+Private gDependencyArrowTransfers As Long
+Private gDependencyVisibilityKnown As Boolean
+Private gDependenciesVisible As Boolean
+Private gDependencyHarnessSequence As Long
+Private gActiveLogicalRoute As clsGanttDependencyRoute
 
 '------------------------------------------------------------------------------
 ' FR: Reinitialise Gantt Dependency Clear Expanded Links Cache dans le perimetre possede par le composant.
@@ -56,7 +73,434 @@ Private gExpandedLinks As Object
 
 Public Sub GanttDependency_ClearExpandedLinksCache()
     Set gExpandedLinks = Nothing
+    GanttDependencySvg_Invalidate "ExpandedLinksCache", True
 End Sub
+
+'------------------------------------------------------------------------------
+' Reroutes only links adjacent to affected task IDs. The index is built during
+' a canonical Day render and remains workbook-local until explicit invalidation.
+'------------------------------------------------------------------------------
+Public Function GanttDependency_DrawAffectedLinks( _
+    ByVal wsGantt As Worksheet, _
+    ByVal mapWBS As Object, _
+    ByRef dataArr As Variant, _
+    ByVal hasChildren As Object, _
+    ByVal rowById As Object, _
+    ByVal projectStart As Variant, _
+    ByVal totalDays As Long, _
+    ByVal baseById As Object, _
+    ByVal testById As Object, _
+    ByVal isTestMode As Boolean, _
+    ByVal affectedIds As Object, _
+    ByRef fallbackReason As String) As Boolean
+
+    Dim perfScope As clsPerfScope
+    Dim affectedLinks As Object
+    Dim anchorCache As Object
+    Dim prefix As Variant
+    Dim segmentName As Variant
+    Dim spec As Object
+    Dim oldSegments As Object
+    Dim newSegments As Object
+    Dim shp As Shape
+    Dim inspectedLinks As Long
+
+    Set perfScope = Profiler_BeginScope("GanttDependency_DrawAffectedLinks", "Gantt Local")
+    On Error GoTo Failed
+
+    fallbackReason = ""
+    If gLinkSpecsByPrefix Is Nothing Or _
+       gIncomingLinksByTask Is Nothing Or _
+       gOutgoingLinksByTask Is Nothing Or _
+       gSegmentsByLink Is Nothing Then
+        fallbackReason = "DependencyIndexAbsent"
+        Exit Function
+    End If
+
+    Set affectedLinks = CreateObject("Scripting.Dictionary")
+    GanttDependency_CollectAffectedLinkPrefixes affectedIds, gIncomingLinksByTask, affectedLinks
+    GanttDependency_CollectAffectedLinkPrefixes affectedIds, gOutgoingLinksByTask, affectedLinks
+
+    If IsAggregatedScaleMode() Then
+        If GanttDependencySvg_IsRequested() Then
+            GanttDependencySvg_SetVisible wsGantt, False
+            GanttDependencySvg_AcceptAggregatedScaleHidden wsGantt
+        End If
+        GanttDependency_DrawAffectedLinks = True
+        Exit Function
+    End If
+
+    If affectedLinks.Count = 0 Then
+        Profiler_RecordOperation "GanttLocalLinksInspected", 0, 0#
+        GanttDependency_DrawAffectedLinks = True
+        Exit Function
+    End If
+
+    If GanttDependencySvg_IsRequested() And Not GanttDependencySvg_HasRoutes() Then
+        EnsureExpandedLinksCacheFromCalc
+        If HasExpandedLinksAvailable() Then
+            GanttDependencySvg_Invalidate "LocalSvgRoutesAbsent", True
+            If GanttDependency_TryDrawSvgFull( _
+                wsGantt, mapWBS, dataArr, hasChildren, rowById, _
+                projectStart, totalDays, baseById, testById, isTestMode) Then
+                Profiler_RecordOperation "GanttDependencySvgLocalColdRebuild", 1, 0#
+                GanttDependency_DrawAffectedLinks = True
+                Exit Function
+            End If
+        End If
+
+        fallbackReason = GanttDependencySvg_GetFallbackReason()
+        If Len(fallbackReason) = 0 Then fallbackReason = "DependencySvgRoutesAbsent"
+        Exit Function
+    End If
+
+    If GanttDependencySvg_IsRequested() And GanttDependencySvg_HasRoutes() Then
+        Set anchorCache = CreateObject("Scripting.Dictionary")
+
+        For Each prefix In affectedLinks.Keys
+            If Not gLinkSpecsByPrefix.Exists(CStr(prefix)) Then
+                fallbackReason = "DependencySvgSpecMissing"
+                Exit Function
+            End If
+
+            Set spec = gLinkSpecsByPrefix(CStr(prefix))
+            Set gActiveLogicalRoute = GanttDependency_CreateLogicalRoute(spec, CStr(prefix))
+            DrawSingleDependencyLink _
+                wsGantt, mapWBS, dataArr, hasChildren, rowById, _
+                projectStart, totalDays, _
+                CStr(spec("PredID")), CStr(spec("SuccID")), _
+                baseById, testById, isTestMode, _
+                anchorCache, CStr(prefix), _
+                CStr(spec("LinkType")), CDbl(spec("Lag"))
+
+            If Not gActiveLogicalRoute Is Nothing Then
+                GanttDependencySvg_StoreRoute gActiveLogicalRoute
+            End If
+            Set gActiveLogicalRoute = Nothing
+            inspectedLinks = inspectedLinks + 1
+        Next prefix
+
+        If GanttDependencySvg_TryCommit(wsGantt) Then
+            Profiler_RecordOperation "GanttLocalLinksInspected", inspectedLinks, 0#
+            Profiler_RecordOperation "GanttDependencySvgLocalCommits", 1, 0#
+            GanttDependency_DrawAffectedLinks = True
+            Exit Function
+        End If
+
+        fallbackReason = GanttDependencySvg_GetFallbackReason()
+        If Len(fallbackReason) = 0 Then fallbackReason = "DependencySvgLocalCommitFailed"
+        Exit Function
+    End If
+
+    Set gExpectedDependencySegments = CreateObject("Scripting.Dictionary")
+    Set gExistingDependencySegments = CreateObject("Scripting.Dictionary")
+    gDependencyForceCreate = False
+    gDependencyCreates = 0
+    gDependencyUpdates = 0
+    gDependencyDeletes = 0
+    gDependencyInspections = 0
+    gDependencyArrowTransfers = 0
+
+    'Resolve only the stable names owned by affected links.
+    For Each prefix In affectedLinks.Keys
+        If gSegmentsByLink.Exists(CStr(prefix)) Then
+            Set oldSegments = gSegmentsByLink(CStr(prefix))
+            For Each segmentName In oldSegments.Keys
+                Set shp = Nothing
+                On Error Resume Next
+                Set shp = wsGantt.Shapes(CStr(segmentName))
+                On Error GoTo Failed
+                If Not shp Is Nothing Then
+                    gExistingDependencySegments.Add CStr(segmentName), shp
+                    gDependencyInspections = gDependencyInspections + 1
+                End If
+            Next segmentName
+        End If
+    Next prefix
+
+    Set anchorCache = CreateObject("Scripting.Dictionary")
+
+    For Each prefix In affectedLinks.Keys
+        If Not gLinkSpecsByPrefix.Exists(CStr(prefix)) Then
+            fallbackReason = "DependencySpecMissing"
+            GoTo FailedWithoutError
+        End If
+
+        Set spec = gLinkSpecsByPrefix(CStr(prefix))
+        inspectedLinks = inspectedLinks + 1
+
+        DrawSingleDependencyLink _
+            wsGantt, mapWBS, dataArr, hasChildren, rowById, _
+            projectStart, totalDays, _
+            CStr(spec("PredID")), CStr(spec("SuccID")), _
+            baseById, testById, isTestMode, _
+            anchorCache, CStr(prefix), _
+            CStr(spec("LinkType")), CDbl(spec("Lag"))
+    Next prefix
+
+    'Delete only stale segments belonging to the affected link prefixes, then
+    'commit the new per-link segment index.
+    For Each prefix In affectedLinks.Keys
+        If gSegmentsByLink.Exists(CStr(prefix)) Then
+            Set oldSegments = gSegmentsByLink(CStr(prefix))
+            For Each segmentName In oldSegments.Keys
+                If Not gExpectedDependencySegments.Exists(CStr(segmentName)) Then
+                    On Error Resume Next
+                    wsGantt.Shapes(CStr(segmentName)).Delete
+                    If Err.Number = 0 Then gDependencyDeletes = gDependencyDeletes + 1
+                    Err.Clear
+                    On Error GoTo Failed
+                End If
+            Next segmentName
+        End If
+
+        Set newSegments = CreateObject("Scripting.Dictionary")
+        For Each segmentName In gExpectedDependencySegments.Keys
+            If Left$(CStr(segmentName), Len(CStr(prefix)) + 1) = CStr(prefix) & "_" Then
+                newSegments(CStr(segmentName)) = True
+            End If
+        Next segmentName
+
+        If gSegmentsByLink.Exists(CStr(prefix)) Then
+            Set gSegmentsByLink(CStr(prefix)) = newSegments
+        Else
+            gSegmentsByLink.Add CStr(prefix), newSegments
+        End If
+    Next prefix
+
+    Profiler_RecordOperation "GanttLocalLinksInspected", inspectedLinks, 0#
+    Profiler_RecordOperation "GanttLocalDependencySegmentsInspected", gDependencyInspections, 0#
+    Profiler_RecordOperation "GanttLocalDependencySegmentsCreated", gDependencyCreates, 0#
+    Profiler_RecordOperation "GanttLocalDependencySegmentsUpdated", gDependencyUpdates, 0#
+    Profiler_RecordOperation "GanttLocalDependencySegmentsDeleted", gDependencyDeletes, 0#
+    Profiler_RecordOperation "GanttDependencyArrowTransfers", gDependencyArrowTransfers, 0#
+
+    GanttDependency_DrawAffectedLinks = True
+
+CleanExit:
+    Set gActiveLogicalRoute = Nothing
+    Set gExpectedDependencySegments = Nothing
+    Set gExistingDependencySegments = Nothing
+    gDependencyForceCreate = False
+    Exit Function
+
+Failed:
+    fallbackReason = "DependencyLocalError_" & CStr(Err.Number)
+FailedWithoutError:
+    GanttDependency_DrawAffectedLinks = False
+    GoTo CleanExit
+
+End Function
+
+Private Sub GanttDependency_ResetLocalIndex()
+
+    Set gLinkSpecsByPrefix = CreateObject("Scripting.Dictionary")
+    Set gIncomingLinksByTask = CreateObject("Scripting.Dictionary")
+    Set gOutgoingLinksByTask = CreateObject("Scripting.Dictionary")
+    Set gSegmentsByLink = CreateObject("Scripting.Dictionary")
+
+End Sub
+
+Private Sub GanttDependency_RegisterLink( _
+    ByVal shapePrefix As String, _
+    ByVal predId As String, _
+    ByVal succId As String, _
+    ByVal linkType As String, _
+    ByVal linkLag As Double)
+
+    Dim spec As Object
+
+    If gLinkSpecsByPrefix Is Nothing Then GanttDependency_ResetLocalIndex
+
+    Set spec = CreateObject("Scripting.Dictionary")
+    spec("PredID") = predId
+    spec("SuccID") = succId
+    spec("LinkType") = linkType
+    spec("Lag") = linkLag
+    gLinkSpecsByPrefix.Add shapePrefix, spec
+
+    GanttDependency_IndexLink gOutgoingLinksByTask, predId, shapePrefix
+    GanttDependency_IndexLink gIncomingLinksByTask, succId, shapePrefix
+
+End Sub
+
+Private Sub GanttDependency_IndexLink( _
+    ByVal indexByTask As Object, _
+    ByVal taskId As String, _
+    ByVal shapePrefix As String)
+
+    Dim linksForTask As Object
+
+    If Not indexByTask.Exists(taskId) Then
+        Set linksForTask = CreateObject("Scripting.Dictionary")
+        indexByTask.Add taskId, linksForTask
+    Else
+        Set linksForTask = indexByTask(taskId)
+    End If
+
+    linksForTask(shapePrefix) = True
+
+End Sub
+
+Private Sub GanttDependency_RegisterSegment(ByVal shapeName As String)
+
+    Dim prefix As String
+    Dim splitPos As Long
+    Dim segments As Object
+
+    splitPos = InStrRev(shapeName, "_")
+    If splitPos < 1 Then Exit Sub
+    prefix = Left$(shapeName, splitPos - 1)
+
+    If gSegmentsByLink Is Nothing Then Set gSegmentsByLink = CreateObject("Scripting.Dictionary")
+
+    If Not gSegmentsByLink.Exists(prefix) Then
+        Set segments = CreateObject("Scripting.Dictionary")
+        gSegmentsByLink.Add prefix, segments
+    Else
+        Set segments = gSegmentsByLink(prefix)
+    End If
+
+    segments(shapeName) = True
+
+End Sub
+
+Private Sub GanttDependency_CollectAffectedLinkPrefixes( _
+    ByVal affectedIds As Object, _
+    ByVal sourceIndex As Object, _
+    ByVal target As Object)
+
+    Dim idVal As Variant
+    Dim prefix As Variant
+    Dim linksForTask As Object
+
+    If affectedIds Is Nothing Then Exit Sub
+
+    For Each idVal In affectedIds.Keys
+        If sourceIndex.Exists(CStr(idVal)) Then
+            Set linksForTask = sourceIndex(CStr(idVal))
+            For Each prefix In linksForTask.Keys
+                target(CStr(prefix)) = True
+            Next prefix
+        End If
+    Next idVal
+
+End Sub
+
+Public Function GanttDependency_MarkAffectedLinksDirty( _
+    ByVal affectedIds As Object, _
+    Optional ByRef dirtyCount As Long = 0) As Boolean
+
+    Dim affectedLinks As Object
+
+    On Error GoTo Failed
+    dirtyCount = 0
+    If affectedIds Is Nothing Then
+        GanttDependency_MarkAffectedLinksDirty = True
+        Exit Function
+    End If
+
+    If gIncomingLinksByTask Is Nothing Or gOutgoingLinksByTask Is Nothing Then
+        GanttDependency_MarkAffectedLinksDirty = False
+        Exit Function
+    End If
+
+    Set affectedLinks = CreateObject("Scripting.Dictionary")
+    GanttDependency_CollectAffectedLinkPrefixes affectedIds, gIncomingLinksByTask, affectedLinks
+    GanttDependency_CollectAffectedLinkPrefixes affectedIds, gOutgoingLinksByTask, affectedLinks
+
+    dirtyCount = affectedLinks.Count
+    If dirtyCount > 0 And GanttDependencySvg_IsRequested() Then
+        GanttDependencySvg_MarkLinksDirty affectedLinks
+    End If
+
+    Profiler_RecordOperation "GanttDependencyIncidentDirtyLinks", dirtyCount, 0#
+    GanttDependency_MarkAffectedLinksDirty = True
+    Exit Function
+
+Failed:
+    GanttDependency_MarkAffectedLinksDirty = False
+
+End Function
+
+Public Sub GanttDependency_InvalidateLocalIndex(Optional ByVal reason As String = "")
+
+    Set gLinkSpecsByPrefix = Nothing
+    Set gIncomingLinksByTask = Nothing
+    Set gOutgoingLinksByTask = Nothing
+    Set gSegmentsByLink = Nothing
+    gDependencyVisibilityKnown = False
+    gDependenciesVisible = False
+    GanttDependencySvg_Invalidate reason, True
+
+    If Len(Trim$(reason)) > 0 Then
+        Profiler_RecordOperation "GanttDependencyIndexInvalidation_" & reason, 1, 0#
+    End If
+
+End Sub
+
+Public Function GanttDependency_PrimeLocalIndex(ByVal wsGantt As Worksheet) As Boolean
+
+    Dim perfScope As clsPerfScope
+    Dim succId As Variant
+    Dim linkItem As Variant
+    Dim predId As String
+    Dim shapePrefix As String
+    Dim linkIndex As Long
+    Dim i As Long
+    Dim shapeName As String
+
+    Set perfScope = Profiler_BeginScope("GanttDependency_PrimeLocalIndex", "Gantt Local")
+    On Error GoTo Failed
+
+    If wsGantt Is Nothing Then Exit Function
+    If GanttDependencySvg_HasLayer(wsGantt) And Not GanttDependencySvg_HasRoutes() Then
+        If GanttDependencySvg_TryHydratePersistentCache(wsGantt, True) Then
+            Profiler_RecordOperation "GanttDependencySvgPrimeHydratedRoutes", 1, 0#
+        Else
+            Profiler_RecordOperation "GanttDependencySvgPrimeRequiresCanonical", 1, 0#
+            GanttDependencySvg_Invalidate "ColdSvgLayerWithoutRoutes", True
+        End If
+    End If
+
+    EnsureExpandedLinksCacheFromCalc
+    If Not HasExpandedLinksAvailable() Then Exit Function
+
+    GanttDependency_ResetLocalIndex
+
+    For Each succId In gExpandedLinks.Keys
+        linkIndex = 0
+        For Each linkItem In gExpandedLinks(CStr(succId))
+            predId = Trim$(CStr(linkItem("PredID")))
+            If predId <> "" Then
+                linkIndex = linkIndex + 1
+                shapePrefix = "DEP_" & predId & "_" & CStr(succId) & "_" & CStr(linkIndex)
+                GanttDependency_RegisterLink _
+                    shapePrefix, predId, CStr(succId), _
+                    GetLinkTypeFromItem(linkItem), GetLinkLagFromItem(linkItem)
+            End If
+        Next linkItem
+    Next succId
+
+    'One bootstrap scan is allowed after opening. Subsequent local transactions
+    'resolve only exact names through the per-link segment index.
+    For i = 1 To wsGantt.Shapes.Count
+        shapeName = CStr(wsGantt.Shapes(i).Name)
+        If Left$(shapeName, 4) = "DEP_" Then GanttDependency_RegisterSegment shapeName
+    Next i
+
+    gDependencyVisibilityKnown = True
+    gDependenciesVisible = Not IsAggregatedScaleMode()
+
+    Profiler_RecordOperation "GanttDependencyPrimeShapeScans", wsGantt.Shapes.Count, 0#
+    Profiler_RecordOperation "GanttDependencyPrimeLinks", gLinkSpecsByPrefix.Count, 0#
+    GanttDependency_PrimeLocalIndex = True
+    Exit Function
+
+Failed:
+    GanttDependency_InvalidateLocalIndex "PrimeError"
+
+End Function
 
 
 
@@ -91,7 +535,8 @@ Public Sub DrawDependencyLinks( _
     ByVal totalDays As Long, _
     ByVal baseById As Object, _
     ByVal testById As Object, _
-    ByVal isTestMode As Boolean)
+    ByVal isTestMode As Boolean, _
+    Optional ByVal forceCreate As Boolean = False)
 
     Dim perfScope As clsPerfScope
 
@@ -101,17 +546,69 @@ Public Sub DrawDependencyLinks( _
     Dim shapePrefix As String
     Dim linkIndex As Long
     Dim anchorCache As Object
+    Dim aggregatedScale As Boolean
+    Dim i As Long
+    Dim existingName As String
+    Dim svgRendered As Boolean
 
     Set perfScope = Profiler_BeginScope("DrawDependencyLinks", "Dependency Render")
 
-    If IsAggregatedScaleMode() Then Exit Sub
-
     On Error GoTo SafeExit
 
+    Set gExpectedDependencySegments = CreateObject("Scripting.Dictionary")
+    Set gExistingDependencySegments = CreateObject("Scripting.Dictionary")
+    gDependencyForceCreate = forceCreate
+    gDependencyCreates = 0
+    gDependencyUpdates = 0
+    gDependencyDeletes = 0
+    gDependencyInspections = 0
+    gDependencyArrowTransfers = 0
+
+    aggregatedScale = IsAggregatedScaleMode()
+    If aggregatedScale Then
+        GanttDependencySvg_SetVisible wsGantt, False
+        GanttDependencySvg_AcceptAggregatedScaleHidden wsGantt
+        If Not gDependencyVisibilityKnown Or gDependenciesVisible Then
+            GanttDependency_SetIndexedVisibility wsGantt, False
+        End If
+        GoTo SafeExit
+    End If
+
+    If GanttDependencySvg_IsRequested() Then
+        If GanttDependencySvg_CanReuseVisibleDayLayer(wsGantt) Then
+            svgRendered = True
+            GoTo SafeExit
+        End If
+
+        EnsureExpandedLinksCacheFromCalc
+        If HasExpandedLinksAvailable() Then
+            svgRendered = GanttDependency_TryDrawSvgFull( _
+                wsGantt, mapWBS, dataArr, hasChildren, rowById, _
+                projectStart, totalDays, baseById, testById, isTestMode)
+            If svgRendered Then GoTo SafeExit
+        End If
+
+        GanttDependencySvg_ActivateHistorical wsGantt, _
+            GanttDependencySvg_GetFallbackReason()
+    End If
+
+    If Not forceCreate Then
+        If Not GanttDependency_LoadIndexedExistingSegments(wsGantt) Then
+            For i = 1 To wsGantt.Shapes.Count
+                existingName = CStr(wsGantt.Shapes(i).Name)
+                If Left$(existingName, 4) = "DEP_" Then
+                    gExistingDependencySegments.Add existingName, wsGantt.Shapes(i)
+                    gDependencyInspections = gDependencyInspections + 1
+                End If
+            Next i
+        End If
+    End If
+
     EnsureExpandedLinksCacheFromCalc
-    If Not HasExpandedLinksAvailable() Then Exit Sub
+    If Not HasExpandedLinksAvailable() Then GoTo SafeExit
 
     Set anchorCache = CreateObject("Scripting.Dictionary")
+    GanttDependency_ResetLocalIndex
 
     For Each succId In gExpandedLinks.Keys
 
@@ -125,12 +622,15 @@ Public Sub DrawDependencyLinks( _
                 If rowById.Exists(predId) And rowById.Exists(CStr(succId)) Then
 
                     '==================================================
-                    ' NOUVELLE R»GLE :
+                    ' NOUVELLE R√àGLE :
                     ' on accepte aussi l'affichage des liens parent -> parent
                     ' si le lien existe dans CALC, on le dessine
                     '==================================================
                     linkIndex = linkIndex + 1
                     shapePrefix = "DEP_" & predId & "_" & CStr(succId) & "_" & CStr(linkIndex)
+                    GanttDependency_RegisterLink _
+                        shapePrefix, predId, CStr(succId), _
+                        GetLinkTypeFromItem(linkItem), GetLinkLagFromItem(linkItem)
 
                     DrawSingleDependencyLink _
                         wsGantt, mapWBS, dataArr, hasChildren, rowById, _
@@ -150,6 +650,186 @@ NextLink:
     Next succId
 
 SafeExit:
+    If Not aggregatedScale And Not svgRendered Then
+        GanttDependency_DeleteStaleSegments wsGantt
+        gDependencyVisibilityKnown = True
+        gDependenciesVisible = True
+    End If
+    Profiler_RecordOperation "GanttDiffDependencySegmentsInspected", gDependencyInspections, 0#
+    Profiler_RecordOperation "GanttDiffDependencySegmentsCreated", gDependencyCreates, 0#
+    Profiler_RecordOperation "GanttDiffDependencySegmentsUpdated", gDependencyUpdates, 0#
+    Profiler_RecordOperation "GanttDiffDependencySegmentsDeleted", gDependencyDeletes, 0#
+    Profiler_RecordOperation "GanttDependencyArrowTransfers", gDependencyArrowTransfers, 0#
+    Set gExpectedDependencySegments = Nothing
+    Set gExistingDependencySegments = Nothing
+    gDependencyForceCreate = False
+    Set gActiveLogicalRoute = Nothing
+End Sub
+
+Private Function GanttDependency_TryDrawSvgFull( _
+    ByVal wsGantt As Worksheet, _
+    ByVal mapWBS As Object, _
+    ByRef dataArr As Variant, _
+    ByVal hasChildren As Object, _
+    ByVal rowById As Object, _
+    ByVal projectStart As Variant, _
+    ByVal totalDays As Long, _
+    ByVal baseById As Object, _
+    ByVal testById As Object, _
+    ByVal isTestMode As Boolean) As Boolean
+
+    Dim perfScope As clsPerfScope
+    Dim succId As Variant
+    Dim linkItem As Variant
+    Dim predId As String
+    Dim shapePrefix As String
+    Dim linkIndex As Long
+    Dim anchorCache As Object
+    Dim spec As Object
+    Dim rebuildAll As Boolean
+    Dim routesBuilt As Long
+    Dim routesReused As Long
+
+    Set perfScope = Profiler_BeginScope("GanttDependency_TryDrawSvgFull", "Dependency SVG")
+    On Error GoTo Failed
+
+    rebuildAll = Not GanttDependencySvg_HasRoutes()
+    If rebuildAll Then GanttDependencySvg_BeginFullModel
+
+    Set anchorCache = CreateObject("Scripting.Dictionary")
+    GanttDependency_ResetLocalIndex
+
+    For Each succId In gExpandedLinks.Keys
+        linkIndex = 0
+        For Each linkItem In gExpandedLinks(CStr(succId))
+            predId = Trim$(CStr(linkItem("PredID")))
+            If predId <> "" Then
+                If rowById.Exists(predId) And rowById.Exists(CStr(succId)) Then
+                    linkIndex = linkIndex + 1
+                    shapePrefix = "DEP_" & predId & "_" & CStr(succId) & "_" & CStr(linkIndex)
+                    GanttDependency_RegisterLink _
+                        shapePrefix, predId, CStr(succId), _
+                        GetLinkTypeFromItem(linkItem), GetLinkLagFromItem(linkItem)
+
+                    If rebuildAll Or GanttDependencySvg_ShouldRebuildRoute(shapePrefix) Then
+                        Set spec = gLinkSpecsByPrefix(shapePrefix)
+                        Set gActiveLogicalRoute = GanttDependency_CreateLogicalRoute(spec, shapePrefix)
+                        DrawSingleDependencyLink _
+                            wsGantt, mapWBS, dataArr, hasChildren, rowById, _
+                            projectStart, totalDays, predId, CStr(succId), _
+                            baseById, testById, isTestMode, anchorCache, shapePrefix, _
+                            CStr(spec("LinkType")), CDbl(spec("Lag"))
+                        GanttDependencySvg_StoreRoute gActiveLogicalRoute
+                        Set gActiveLogicalRoute = Nothing
+                        routesBuilt = routesBuilt + 1
+                    Else
+                        routesReused = routesReused + 1
+                    End If
+                End If
+            End If
+        Next linkItem
+    Next succId
+
+    Profiler_RecordOperation "GanttDependencySvgRoutesBuilt", routesBuilt, 0#
+    Profiler_RecordOperation "GanttDependencySvgRoutesReused", routesReused, 0#
+    GanttDependency_TryDrawSvgFull = GanttDependencySvg_TryCommit(wsGantt)
+    Exit Function
+
+Failed:
+    Set gActiveLogicalRoute = Nothing
+    Profiler_RecordOperation "GanttDependencySvgRouteBuildError", 1, 0#
+
+End Function
+
+Private Function GanttDependency_CreateLogicalRoute( _
+    ByVal spec As Object, _
+    ByVal shapePrefix As String) As clsGanttDependencyRoute
+
+    Dim route As clsGanttDependencyRoute
+
+    Set route = New clsGanttDependencyRoute
+    route.Initialize _
+        shapePrefix, CStr(spec("PredID")), CStr(spec("SuccID")), _
+        CStr(spec("LinkType")), CDbl(spec("Lag"))
+    Set GanttDependency_CreateLogicalRoute = route
+
+End Function
+
+Private Function GanttDependency_LoadIndexedExistingSegments(ByVal ws As Worksheet) As Boolean
+
+    Dim prefix As Variant
+    Dim segmentName As Variant
+    Dim segments As Object
+    Dim shp As Shape
+
+    If gSegmentsByLink Is Nothing Then Exit Function
+    If gSegmentsByLink.Count = 0 Then Exit Function
+
+    For Each prefix In gSegmentsByLink.Keys
+        Set segments = gSegmentsByLink(CStr(prefix))
+        For Each segmentName In segments.Keys
+            Set shp = Nothing
+            On Error Resume Next
+            Set shp = ws.Shapes(CStr(segmentName))
+            On Error GoTo 0
+
+            If shp Is Nothing Then
+                Set gExistingDependencySegments = CreateObject("Scripting.Dictionary")
+                Exit Function
+            End If
+            gExistingDependencySegments.Add CStr(segmentName), shp
+            gDependencyInspections = gDependencyInspections + 1
+        Next segmentName
+    Next prefix
+
+    GanttDependency_LoadIndexedExistingSegments = True
+
+End Function
+
+Private Sub GanttDependency_SetIndexedVisibility(ByVal ws As Worksheet, ByVal makeVisible As Boolean)
+
+    Dim prefix As Variant
+    Dim segmentName As Variant
+    Dim segments As Object
+    Dim shp As Shape
+    Dim targetVisibility As MsoTriState
+    Dim changedCount As Long
+    Dim visibilityTransitionKnown As Boolean
+
+    targetVisibility = IIf(makeVisible, msoTrue, msoFalse)
+    visibilityTransitionKnown = _
+        gDependencyVisibilityKnown And (gDependenciesVisible <> makeVisible)
+
+    If gSegmentsByLink Is Nothing Then
+        GanttDependency_SetExistingVisibility ws, makeVisible
+        gDependencyVisibilityKnown = True
+        gDependenciesVisible = makeVisible
+        Exit Sub
+    End If
+
+    For Each prefix In gSegmentsByLink.Keys
+        Set segments = gSegmentsByLink(CStr(prefix))
+        For Each segmentName In segments.Keys
+            Set shp = Nothing
+            On Error Resume Next
+            Set shp = ws.Shapes(CStr(segmentName))
+            On Error GoTo 0
+            If Not shp Is Nothing Then
+                If visibilityTransitionKnown Then
+                    shp.Visible = targetVisibility
+                    changedCount = changedCount + 1
+                ElseIf shp.Visible <> targetVisibility Then
+                    shp.Visible = targetVisibility
+                    changedCount = changedCount + 1
+                End If
+            End If
+        Next segmentName
+    Next prefix
+
+    gDependencyVisibilityKnown = True
+    gDependenciesVisible = makeVisible
+    Profiler_RecordOperation "GanttDiffDependencyVisibilityUpdated", changedCount, 0#
+
 End Sub
 '------------------------------------------------------------------------------
 ' FR: Calcule ou dessine une partie des liens de dependance visibles dans le GANTT.
@@ -232,6 +912,7 @@ Private Sub DrawSingleDependencyLink( _
     ByVal linkLag As Double)
 
     Dim perfScope As clsPerfScope
+    Dim stageScope As clsPerfScope
 
     Dim predRow As Long
     Dim succRow As Long
@@ -254,6 +935,7 @@ Private Sub DrawSingleDependencyLink( _
     Dim succDate As Variant
     Dim gapDays As Long
     Dim useMidLeftEntry As Boolean
+    Dim cellWidth As Double
 
     Set perfScope = Profiler_BeginScope("DrawSingleDependencyLink", "Dependency Render")
 
@@ -273,61 +955,84 @@ Private Sub DrawSingleDependencyLink( _
     If linkType = "" Then linkType = "FS"
 
     GetLinkAnchorTypes linkType, predAnchorType, succAnchorType
+    Set stageScope = Profiler_BeginScope("DependencyRoute_CellWidthRead", "Dependency Render")
+    cellWidth = wsGantt.cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Width
+    Set stageScope = Nothing
 
+    Set stageScope = Profiler_BeginScope("DependencyRoute_ReferenceDates", "Dependency Render")
     predDate = GetLinkReferenceDate(predId, predAnchorType, baseById, testById, isTestMode)
     succDate = GetLinkReferenceDate(succId, succAnchorType, baseById, testById, isTestMode)
+    Set stageScope = Nothing
 
     If Not HasValue(predDate) Then Exit Sub
     If Not HasValue(succDate) Then Exit Sub
 
+    Set stageScope = Profiler_BeginScope("DependencyRoute_AnchorLookup", "Dependency Render")
     GetCachedTaskAnchorPointByType anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, predDataRow, _
         predAnchorType, predX, predY, baseById, testById, isTestMode
+    Set stageScope = Nothing
 
     Select Case linkType
 
         Case "SS"
+            Set stageScope = Profiler_BeginScope("DependencyRoute_AnchorLookup", "Dependency Render")
             GetCachedTaskAnchorPointByType anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, succDataRow, _
                 succAnchorType, succX, succY, baseById, testById, isTestMode
+            Set stageScope = Nothing
 
             gapDays = CLng(CDbl(succDate) - CDbl(predDate) - linkLag)
-            RouteDependencyLink_SS wsGantt, shapePrefix, predX, predY, succX, succY, gapDays
+            Set stageScope = Profiler_BeginScope("DependencyRoute_SegmentConstruction", "Dependency Render")
+            RouteDependencyLink_SS wsGantt, shapePrefix, predX, predY, succX, succY, gapDays, cellWidth
+            Set stageScope = Nothing
 
         Case "FF"
+            Set stageScope = Profiler_BeginScope("DependencyRoute_AnchorLookup", "Dependency Render")
             GetCachedTaskAnchorPointByType anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, succDataRow, _
                 succAnchorType, succX, succY, baseById, testById, isTestMode
+            Set stageScope = Nothing
 
             gapDays = CLng(CDbl(succDate) - CDbl(predDate) - linkLag)
-            RouteDependencyLink_FF wsGantt, shapePrefix, predX, predY, succX, succY, gapDays
+            Set stageScope = Profiler_BeginScope("DependencyRoute_SegmentConstruction", "Dependency Render")
+            RouteDependencyLink_FF wsGantt, shapePrefix, predX, predY, succX, succY, gapDays, cellWidth
+            Set stageScope = Nothing
 
         Case Else   ' FS
             gapDays = CLng(CDbl(succDate) - CDbl(predDate) - 1 - linkLag)
 
-            ' On calcule les 2 points candidats cÙtÈ successeur
+            ' On calcule les 2 points candidats c√¥t√© successeur
+            Set stageScope = Profiler_BeginScope("DependencyRoute_AnchorLookup", "Dependency Render")
             GetCachedTaskTopEntryPoint anchorCache, wsGantt, mapWBS, dataArr, projectStart, totalDays, succDataRow, _
                 succTopX, succTopY, baseById, testById, isTestMode
 
             GetCachedTaskStartMidEntryPoint anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, succDataRow, _
                 succMidLeftX, succMidLeftY, baseById, testById, isTestMode
+            Set stageScope = Nothing
 
-            ' RËgle corrigÈe :
-            ' on ne dÈcide PAS avec gapDays=0/1
-            ' on dÈcide avec la place horizontale rÈelle entre pred et l'entrÈe gauche du successeur
-            useMidLeftEntry = HasRoomForFsMidLeftEntry(predX, succMidLeftX, wsGantt.cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Width)
+            ' R√®gle corrig√©e :
+            ' on ne d√©cide PAS avec gapDays=0/1
+            ' on d√©cide avec la place horizontale r√©elle entre pred et l'entr√©e gauche du successeur
+            useMidLeftEntry = HasRoomForFsMidLeftEntry(predX, succMidLeftX, cellWidth)
 
             If gapDays < 0 Then
                 succX = succMidLeftX
                 succY = succMidLeftY
-                RouteDependencyLink_FS_Negative wsGantt, shapePrefix, predX, predY, succX, succY, gapDays
+                Set stageScope = Profiler_BeginScope("DependencyRoute_SegmentConstruction", "Dependency Render")
+                RouteDependencyLink_FS_Negative wsGantt, shapePrefix, predX, predY, succX, succY, gapDays, cellWidth
+                Set stageScope = Nothing
 
             ElseIf useMidLeftEntry Then
                 succX = succMidLeftX
                 succY = succMidLeftY
-                RouteDependencyLink_FS_Normal wsGantt, shapePrefix, predX, predY, succX, succY, gapDays
+                Set stageScope = Profiler_BeginScope("DependencyRoute_SegmentConstruction", "Dependency Render")
+                RouteDependencyLink_FS_Normal wsGantt, shapePrefix, predX, predY, succX, succY, gapDays, cellWidth
+                Set stageScope = Nothing
 
             Else
                 succX = succTopX
                 succY = succTopY
+                Set stageScope = Profiler_BeginScope("DependencyRoute_SegmentConstruction", "Dependency Render")
                 RouteDependencyLink_FS_SameDay wsGantt, shapePrefix, predX, predY, succX, succY
+                Set stageScope = Nothing
             End If
 
     End Select
@@ -462,8 +1167,8 @@ Private Function HasRoomForFsMidLeftEntry( _
     Dim minNeeded As Double
 
     ' Il faut une vraie place visuelle pour arriver par la gauche.
-    ' gapDays = 0 peut quand mÍme avoir assez de place ‡ líÈcran.
-    minNeeded = WorksheetFunction.Max(10, cellWidth * 0.55)
+    ' gapDays = 0 peut quand m√™me avoir assez de place √† l‚Äô√©cran.
+    minNeeded = MaxDouble(10, cellWidth * 0.55)
 
     HasRoomForFsMidLeftEntry = ((succMidLeftX - predX) >= minNeeded)
 
@@ -502,7 +1207,7 @@ Private Sub GetTaskStartMidEntryPoint( _
     ByVal testById As Object, _
     ByVal isTestMode As Boolean)
 
-    ' EntrÈe milieu gauche = vrai point milieu cÙtÈ gauche
+    ' Entr√©e milieu gauche = vrai point milieu c√¥t√© gauche
     GetTaskAnchorPointBySide ws, mapWBS, dataArr, hasChildren, projectStart, totalDays, dataRow, _
         "LEFT", xOut, yOut, baseById, testById, isTestMode
 
@@ -518,7 +1223,8 @@ Private Sub RouteDependencyLink_FS_Normal( _
     ByVal predY As Double, _
     ByVal succX As Double, _
     ByVal succY As Double, _
-    ByVal gapDays As Long)
+    ByVal gapDays As Long, _
+    ByVal cellWidth As Double)
 
     Dim endX As Double
     Dim directEnough As Boolean
@@ -527,12 +1233,8 @@ Private Sub RouteDependencyLink_FS_Normal( _
     Dim bendX As Double
     Dim entryGap As Double
     Dim finalX As Double
-    Dim cellWidth As Double
-
-    cellWidth = wsGantt.cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Width
-
-    ' IMPORTANT : plus aucun cas spÈcial ici basÈ sur gapDays = 0.
-    ' Le choix top / milieu-gauche a dÈj‡ ÈtÈ fait en amont.
+    ' IMPORTANT : plus aucun cas sp√©cial ici bas√© sur gapDays = 0.
+    ' Le choix top / milieu-gauche a d√©j√† √©t√© fait en amont.
 
     If gapDays <= 1 Then
         entryGap = 8
@@ -576,9 +1278,9 @@ Private Sub RouteDependencyLink_FS_Normal( _
     routeAbove = (succY <= predY)
 
     If routeAbove Then
-        laneY = WorksheetFunction.Min(predY, succY) - LINK_MIN_CHANNEL_GAP
+        laneY = MinDouble(predY, succY) - LINK_MIN_CHANNEL_GAP
     Else
-        laneY = WorksheetFunction.Max(predY, succY) + LINK_MIN_CHANNEL_GAP
+        laneY = MaxDouble(predY, succY) + LINK_MIN_CHANNEL_GAP
     End If
 
     If gapDays > 1 Then
@@ -619,22 +1321,20 @@ Private Sub RouteDependencyLink_FS_Negative( _
     ByVal predY As Double, _
     ByVal succX As Double, _
     ByVal succY As Double, _
-    ByVal gapDays As Long)
+    ByVal gapDays As Long, _
+    ByVal cellWidth As Double)
 
-    Dim cellWidth As Double
     Dim laneY As Double
     Dim leftX As Double
 
-    cellWidth = wsGantt.cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Width
-
     If succY <= predY Then
-        laneY = WorksheetFunction.Min(predY, succY) - LINK_MIN_CHANNEL_GAP
+        laneY = MinDouble(predY, succY) - LINK_MIN_CHANNEL_GAP
     Else
-        laneY = WorksheetFunction.Max(predY, succY) + LINK_MIN_CHANNEL_GAP
+        laneY = MaxDouble(predY, succY) + LINK_MIN_CHANNEL_GAP
     End If
 
-    leftX = WorksheetFunction.Min(predX, succX) - WorksheetFunction.Max(8, cellWidth / 2)
-    leftX = leftX - WorksheetFunction.Max(6, Abs(gapDays) * (cellWidth / 2))
+    leftX = MinDouble(predX, succX) - MaxDouble(8, cellWidth / 2)
+    leftX = leftX - MaxDouble(6, Abs(gapDays) * (cellWidth / 2))
 
     DrawLinkSegment wsGantt, shapePrefix & "_1", predX, predY, predX, laneY, False
     DrawLinkSegment wsGantt, shapePrefix & "_2", predX, laneY, leftX, laneY, False
@@ -653,17 +1353,15 @@ Private Sub RouteDependencyLink_SS( _
     ByVal predY As Double, _
     ByVal succX As Double, _
     ByVal succY As Double, _
-    ByVal gapDays As Long)
+    ByVal gapDays As Long, _
+    ByVal cellWidth As Double)
 
-    Dim cellWidth As Double
     Dim busX As Double
 
-    cellWidth = wsGantt.cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Width
-
-    busX = WorksheetFunction.Min(predX, succX) - WorksheetFunction.Max(8, cellWidth / 2)
+    busX = MinDouble(predX, succX) - MaxDouble(8, cellWidth / 2)
 
     If gapDays < 0 Then
-        busX = busX - WorksheetFunction.Max(6, Abs(gapDays) * (cellWidth / 2))
+        busX = busX - MaxDouble(6, Abs(gapDays) * (cellWidth / 2))
     End If
 
     DrawLinkSegment wsGantt, shapePrefix & "_1", predX, predY, busX, predY, False
@@ -682,17 +1380,15 @@ Private Sub RouteDependencyLink_FF( _
     ByVal predY As Double, _
     ByVal succX As Double, _
     ByVal succY As Double, _
-    ByVal gapDays As Long)
+    ByVal gapDays As Long, _
+    ByVal cellWidth As Double)
 
-    Dim cellWidth As Double
     Dim busX As Double
 
-    cellWidth = wsGantt.cells(HEADER_ROW_2, FIRST_TIMELINE_COL).Width
-
-    busX = WorksheetFunction.Min(predX, succX) - WorksheetFunction.Max(8, cellWidth / 2)
+    busX = MinDouble(predX, succX) - MaxDouble(8, cellWidth / 2)
 
     If gapDays < 0 Then
-        busX = busX - WorksheetFunction.Max(6, Abs(gapDays) * (cellWidth / 2))
+        busX = busX - MaxDouble(6, Abs(gapDays) * (cellWidth / 2))
     End If
 
     DrawLinkSegment wsGantt, shapePrefix & "_1", predX, predY, busX, predY, False
@@ -767,6 +1463,8 @@ Private Sub FormatDependencyLine(ByVal shp As Shape, ByVal withArrow As Boolean)
         .DashStyle = msoLineSolid
         If withArrow Then
             .EndArrowheadStyle = msoArrowheadTriangle
+        Else
+            .EndArrowheadStyle = msoArrowheadNone
         End If
     End With
 
@@ -787,15 +1485,274 @@ Private Sub DrawLinkSegment( _
     Dim perfScope As clsPerfScope
 
     Dim shp As Shape
+    Dim leftPos As Double
+    Dim topPos As Double
+    Dim widthVal As Double
+    Dim heightVal As Double
+    Dim geometryDiffers As Boolean
+    Dim styleDiffers As Boolean
+    Dim visibilityDiffers As Boolean
+
+    If Not gActiveLogicalRoute Is Nothing Then
+        gActiveLogicalRoute.AddSegment x1, y1, x2, y2, withArrow
+        Exit Sub
+    End If
 
     Set perfScope = Profiler_BeginScope("DrawLinkSegment", "Shape Create")
 
-    If Abs(x2 - x1) < 0.1 And Abs(y2 - y1) < 0.1 Then Exit Sub
+    If Abs(x2 - x1) < 0.1 And Abs(y2 - y1) < 0.1 Then
+        If withArrow Then GanttDependency_TransferTerminalArrow ws, shapeName
+        Exit Sub
+    End If
 
-    Set shp = ws.Shapes.AddLine(x1, y1, x2, y2)
-    shp.Name = shapeName
-    ApplyGanttRenderLinePlacement shp
-    FormatDependencyLine shp, withArrow
+    If Not gExpectedDependencySegments Is Nothing Then
+        gExpectedDependencySegments(shapeName) = True
+    End If
+    GanttDependency_RegisterSegment shapeName
+
+    leftPos = MinDouble(x1, x2)
+    topPos = MinDouble(y1, y2)
+    widthVal = Abs(x2 - x1)
+    heightVal = Abs(y2 - y1)
+
+    If Not gDependencyForceCreate Then
+        If Not gExistingDependencySegments Is Nothing Then
+            If gExistingDependencySegments.Exists(shapeName) Then
+                Set shp = gExistingDependencySegments(shapeName)
+            End If
+        End If
+    End If
+
+    If shp Is Nothing Then
+        Set shp = ws.Shapes.AddLine(x1, y1, x2, y2)
+        shp.Name = shapeName
+        ApplyGanttRenderLinePlacement shp
+        FormatDependencyLine shp, withArrow
+        If Not gExistingDependencySegments Is Nothing Then
+            gExistingDependencySegments.Add shapeName, shp
+        End If
+        gDependencyCreates = gDependencyCreates + 1
+        Exit Sub
+    End If
+
+    gDependencyInspections = gDependencyInspections + 1
+
+    geometryDiffers = _
+        Abs(shp.Left - leftPos) > 0.1 Or _
+        Abs(shp.Top - topPos) > 0.1 Or _
+        Abs(shp.Width - widthVal) > 0.1 Or _
+        Abs(shp.Height - heightVal) > 0.1
+
+    styleDiffers = _
+        shp.Line.ForeColor.RGB <> RGB(120, 120, 120) Or _
+        Abs(shp.Line.Weight - 1) > 0.01 Or _
+        shp.Line.DashStyle <> msoLineSolid Or _
+        ((shp.Line.EndArrowheadStyle = msoArrowheadNone) = withArrow)
+    visibilityDiffers = (shp.Visible <> msoTrue)
+
+    If geometryDiffers Then
+        shp.Left = leftPos
+        shp.Top = topPos
+        shp.Width = widthVal
+        shp.Height = heightVal
+    End If
+
+    If styleDiffers Then FormatDependencyLine shp, withArrow
+    If visibilityDiffers Then shp.Visible = msoTrue
+
+    If geometryDiffers Or styleDiffers Or visibilityDiffers Then
+        gDependencyUpdates = gDependencyUpdates + 1
+    End If
+
+End Sub
+
+Private Function MinDouble(ByVal firstValue As Double, ByVal secondValue As Double) As Double
+    If firstValue < secondValue Then
+        MinDouble = firstValue
+    Else
+        MinDouble = secondValue
+    End If
+End Function
+
+Private Function MaxDouble(ByVal firstValue As Double, ByVal secondValue As Double) As Double
+    If firstValue > secondValue Then
+        MaxDouble = firstValue
+    Else
+        MaxDouble = secondValue
+    End If
+End Function
+
+Private Sub GanttDependency_TransferTerminalArrow( _
+    ByVal ws As Worksheet, _
+    ByVal terminalShapeName As String)
+
+    Dim splitPos As Long
+    Dim segmentIndex As Long
+    Dim candidateName As String
+    Dim shp As Shape
+
+    splitPos = InStrRev(terminalShapeName, "_")
+    If splitPos < 1 Then Exit Sub
+    If Not IsNumeric(Mid$(terminalShapeName, splitPos + 1)) Then Exit Sub
+
+    segmentIndex = CLng(Mid$(terminalShapeName, splitPos + 1)) - 1
+
+    Do While segmentIndex > 0
+        candidateName = Left$(terminalShapeName, splitPos) & CStr(segmentIndex)
+        Set shp = Nothing
+
+        If Not gExistingDependencySegments Is Nothing Then
+            If gExistingDependencySegments.Exists(candidateName) Then
+                Set shp = gExistingDependencySegments(candidateName)
+            End If
+        End If
+
+        If shp Is Nothing Then
+            On Error Resume Next
+            Set shp = ws.Shapes(candidateName)
+            On Error GoTo 0
+        End If
+
+        If Not shp Is Nothing Then
+            FormatDependencyLine shp, True
+            If Not gExpectedDependencySegments Is Nothing Then
+                gExpectedDependencySegments(candidateName) = True
+            End If
+            GanttDependency_RegisterSegment candidateName
+            gDependencyArrowTransfers = gDependencyArrowTransfers + 1
+            Exit Sub
+        End If
+
+        segmentIndex = segmentIndex - 1
+    Loop
+
+End Sub
+
+'------------------------------------------------------------------------------
+' Deterministic proof hook for terminal-arrow ownership. It creates and removes
+' only two exact harness shapes on GANTT and does not touch the dependency index.
+'------------------------------------------------------------------------------
+Public Function GanttDependencyHarness_TerminalArrowCase( _
+    ByVal terminalDeltaX As Double, _
+    ByVal terminalDeltaY As Double) As Variant
+
+    Dim ws As Worksheet
+    Dim prefix As String
+    Dim shapeName As String
+    Dim shp As Shape
+    Dim result(1 To 1, 1 To 6) As Variant
+    Dim arrowCount As Long
+    Dim visibleSegmentCount As Long
+    Dim terminalSegmentExists As Boolean
+    Dim i As Long
+
+    Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
+    gDependencyHarnessSequence = gDependencyHarnessSequence + 1
+    prefix = "HARNESS_DEP_TERMINAL_" & CStr(gDependencyHarnessSequence)
+
+    Set gExpectedDependencySegments = CreateObject("Scripting.Dictionary")
+    Set gExistingDependencySegments = CreateObject("Scripting.Dictionary")
+    gDependencyForceCreate = True
+    gDependencyCreates = 0
+    gDependencyUpdates = 0
+    gDependencyDeletes = 0
+    gDependencyInspections = 0
+    gDependencyArrowTransfers = 0
+
+    On Error GoTo CleanExit
+
+    DrawLinkSegment ws, prefix & "_1", 20#, 20#, 40#, 20#, False
+    DrawLinkSegment _
+        ws, prefix & "_2", 40#, 20#, _
+        40# + terminalDeltaX, 20# + terminalDeltaY, True
+
+    For i = 1 To 2
+        shapeName = prefix & "_" & CStr(i)
+        Set shp = Nothing
+        On Error Resume Next
+        Set shp = ws.Shapes(shapeName)
+        On Error GoTo CleanExit
+
+        If Not shp Is Nothing Then
+            visibleSegmentCount = visibleSegmentCount + 1
+            If shp.Line.EndArrowheadStyle <> msoArrowheadNone Then
+                arrowCount = arrowCount + 1
+            End If
+            If i = 2 Then terminalSegmentExists = True
+        End If
+    Next i
+
+    result(1, 1) = terminalDeltaX
+    result(1, 2) = terminalDeltaY
+    result(1, 3) = visibleSegmentCount
+    result(1, 4) = arrowCount
+    result(1, 5) = terminalSegmentExists
+    result(1, 6) = gDependencyArrowTransfers
+
+CleanExit:
+    On Error Resume Next
+    ws.Shapes(prefix & "_1").Delete
+    ws.Shapes(prefix & "_2").Delete
+    On Error GoTo 0
+
+    Set gExpectedDependencySegments = Nothing
+    Set gExistingDependencySegments = Nothing
+    gDependencyForceCreate = False
+
+    GanttDependencyHarness_TerminalArrowCase = result
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Masque ou affiche les segments existants sans detruire leur identite.
+' EN: Hides or shows existing segments without destroying their identity.
+'------------------------------------------------------------------------------
+Private Sub GanttDependency_SetExistingVisibility( _
+    ByVal ws As Worksheet, _
+    ByVal visibleValue As Boolean)
+
+    Dim shapeName As Variant
+    Dim expectedVisibility As MsoTriState
+    Dim changedCount As Long
+
+    If ws Is Nothing Then Exit Sub
+
+    expectedVisibility = IIf(visibleValue, msoTrue, msoFalse)
+    If gExistingDependencySegments Is Nothing Then Exit Sub
+
+    For Each shapeName In gExistingDependencySegments.Keys
+        If gExistingDependencySegments(shapeName).Visible <> expectedVisibility Then
+            gExistingDependencySegments(shapeName).Visible = expectedVisibility
+            changedCount = changedCount + 1
+        End If
+    Next shapeName
+
+    gDependencyUpdates = gDependencyUpdates + changedCount
+    Profiler_RecordOperation "GanttDiffDependencyVisibilityUpdated", changedCount, 0#
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Supprime les segments DEP absents de la topologie graphique attendue.
+' EN: Deletes DEP segments absent from the expected graphical topology.
+'------------------------------------------------------------------------------
+Private Sub GanttDependency_DeleteStaleSegments(ByVal ws As Worksheet)
+
+    Dim shapeName As Variant
+    Dim shp As Shape
+
+    If ws Is Nothing Then Exit Sub
+    If gExpectedDependencySegments Is Nothing Then Exit Sub
+
+    If gExistingDependencySegments Is Nothing Then Exit Sub
+
+    For Each shapeName In gExistingDependencySegments.Keys
+        If Not gExpectedDependencySegments.Exists(CStr(shapeName)) Then
+            Set shp = gExistingDependencySegments(CStr(shapeName))
+            shp.Delete
+            gDependencyDeletes = gDependencyDeletes + 1
+        End If
+    Next shapeName
 
 End Sub
 
@@ -820,8 +1777,9 @@ End Sub
 '------------------------------------------------------------------------------
 Private Sub EnsureExpandedLinksCacheFromCalc()
 
-    Set gExpandedLinks = Nothing
-    Set gExpandedLinks = BuildExpandedLinksCacheFromLogicLinksTable()
+    If gExpandedLinks Is Nothing Then
+        Set gExpandedLinks = BuildExpandedLinksCacheFromLogicLinksTable()
+    End If
 
 End Sub
 '------------------------------------------------------------------------------

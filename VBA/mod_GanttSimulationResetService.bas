@@ -36,7 +36,6 @@ Public Sub GanttSimulation_ResetToNormal( _
     Dim perfScope As clsPerfScope
     Dim workflowStarted As Boolean
     Dim dragPaused As Boolean
-    Dim visualSimulationWasActive As Boolean
     Dim mutationCount As Long
     Dim refreshCount As Long
     Dim resetErrNumber As Long
@@ -46,9 +45,8 @@ Public Sub GanttSimulation_ResetToNormal( _
     On Error GoTo SafeExit
 
     workflowStarted = EnsurePlanningWorkflowStarted("GanttSimulation_ResetToNormal")
-    visualSimulationWasActive = GanttSimulation_HasRenderedSimulationState()
 
-    If refreshDisplayIfNeeded And visualSimulationWasActive Then
+    If refreshDisplayIfNeeded Then
         GanttDrag_PauseForLifecycle
         dragPaused = True
     End If
@@ -75,8 +73,10 @@ Public Sub GanttSimulation_ResetToNormal( _
         mutationCount = mutationCount + 1
     End If
 
-    If refreshDisplayIfNeeded And visualSimulationWasActive Then
-        Refresh_Gantt_DisplayOnly
+    If refreshDisplayIfNeeded Then
+        If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_LOCAL_UPDATE, "GanttSimulation_ResetToNormal") Then
+            Err.Raise 5, "GanttSimulation_ResetToNormal", "Gantt Reset render did not reach READY state."
+        End If
         refreshCount = 1
     End If
 
@@ -116,3 +116,5 @@ Private Function GanttSimulation_HasRenderedSimulationState() As Boolean
         GanttTestAnalyticsSnapshot_IsCurrent()
 
 End Function
+
+

@@ -27,6 +27,12 @@ Private Const HEADER_ROW_2 As Long = 4
 Private Const GANTT_SCALE_WEEK As String = "WEEK"
 Private Const GANTT_SCALE_MONTH As String = "MONTH"
 
+Private gTimelineProjectionActive As Boolean
+Private gTimelineProjectionSignature As String
+Private gTimelineSlotCount As Long
+Private gTimelineSlotLeft() As Double
+Private gTimelineSlotWidth() As Double
+
 '------------------------------------------------------------------------------
 ' FR: Retourne une decision de rendu ou d'etat utilisee par le workflow GANTT.
 ' EN: Returns a rendering or state decision used by the GANTT workflow.
@@ -459,6 +465,11 @@ Private Function TimelineDateX( _
     If Not HasValue(projectStart) Then Exit Function
     If Not HasValue(taskDate) Then Exit Function
 
+    If GanttTimelineProjection_IsActive(projectStart) Then
+        TimelineDateX = GanttTimelineProjection_DateX(projectStart, taskDate, isFinishSide)
+        Exit Function
+    End If
+
     targetCol = TimelineColumnFromHeaderDate_Exact(ws, projectStart, taskDate)
     If targetCol < FIRST_TIMELINE_COL Then Exit Function
 
@@ -494,6 +505,138 @@ Private Function TimelineDateX( _
     If offsetDays > periodDays Then offsetDays = periodDays
 
     TimelineDateX = cellLeft + (cellWidth * (offsetDays / periodDays))
+
+End Function
+
+Public Sub GanttTimelineProjection_Begin( _
+    ByVal ws As Worksheet, _
+    ByVal projectStart As Variant, _
+    ByVal slotCount As Long)
+
+    Dim perfScope As clsPerfScope
+    Dim i As Long
+    Dim colIndex As Long
+
+    Set perfScope = Profiler_BeginScope("GanttTimelineProjection_Begin", "Timeline Projection")
+
+    gTimelineProjectionActive = False
+    gTimelineProjectionSignature = vbNullString
+    gTimelineSlotCount = 0
+    Erase gTimelineSlotLeft
+    Erase gTimelineSlotWidth
+
+    If ws Is Nothing Then Exit Sub
+    If Not HasValue(projectStart) Then Exit Sub
+    If slotCount < 1 Then Exit Sub
+
+    ReDim gTimelineSlotLeft(0 To slotCount - 1)
+    ReDim gTimelineSlotWidth(0 To slotCount - 1)
+
+    For i = 0 To slotCount - 1
+        colIndex = FIRST_TIMELINE_COL + i
+        gTimelineSlotLeft(i) = ws.Cells(HEADER_ROW_2, colIndex).Left
+        gTimelineSlotWidth(i) = ws.Cells(HEADER_ROW_2, colIndex).Width
+    Next i
+
+    gTimelineSlotCount = slotCount
+    gTimelineProjectionSignature = GanttTimelineProjection_Signature(projectStart)
+    gTimelineProjectionActive = True
+
+    Profiler_RecordOperation "GanttTimelineProjectionSlotReads", slotCount, 0#
+
+End Sub
+
+Public Sub GanttTimelineProjection_End()
+
+    gTimelineProjectionActive = False
+    gTimelineProjectionSignature = vbNullString
+    gTimelineSlotCount = 0
+    Erase gTimelineSlotLeft
+    Erase gTimelineSlotWidth
+
+End Sub
+
+Public Function GanttTimelineProjection_SlotWidth( _
+    ByVal projectStart As Variant, _
+    ByVal taskDate As Variant) As Double
+
+    Dim slotIndex As Long
+
+    If Not GanttTimelineProjection_IsActive(projectStart) Then Exit Function
+    slotIndex = GetTimelineSlotIndex(projectStart, taskDate)
+    If slotIndex < 0 Or slotIndex >= gTimelineSlotCount Then Exit Function
+
+    GanttTimelineProjection_SlotWidth = gTimelineSlotWidth(slotIndex)
+
+End Function
+
+Private Function GanttTimelineProjection_IsActive(ByVal projectStart As Variant) As Boolean
+
+    If Not gTimelineProjectionActive Then Exit Function
+    GanttTimelineProjection_IsActive = (gTimelineProjectionSignature = GanttTimelineProjection_Signature(projectStart))
+
+End Function
+
+Private Function GanttTimelineProjection_Signature(ByVal projectStart As Variant) As String
+
+    If Not HasValue(projectStart) Then Exit Function
+    GanttTimelineProjection_Signature = GetGanttTimelineScaleMode() & "|" & CStr(CDbl(projectStart)) & "|" & CStr(gTimelineSlotCount)
+
+End Function
+
+Private Function GanttTimelineProjection_DateX( _
+    ByVal projectStart As Variant, _
+    ByVal taskDate As Variant, _
+    ByVal isFinishSide As Boolean) As Double
+
+    Dim slotIndex As Long
+    Dim cellLeft As Double
+    Dim cellWidth As Double
+    Dim dateVal As Date
+    Dim periodStart As Date
+    Dim periodDays As Long
+    Dim offsetDays As Double
+
+    If Not HasValue(projectStart) Then Exit Function
+    If Not HasValue(taskDate) Then Exit Function
+
+    slotIndex = GetTimelineSlotIndex(projectStart, taskDate)
+    If slotIndex < 0 Or slotIndex >= gTimelineSlotCount Then Exit Function
+
+    cellLeft = gTimelineSlotLeft(slotIndex)
+    cellWidth = gTimelineSlotWidth(slotIndex)
+
+    If Not IsAggregatedScaleMode() Then
+        If isFinishSide Then
+            GanttTimelineProjection_DateX = cellLeft + cellWidth
+        Else
+            GanttTimelineProjection_DateX = cellLeft
+        End If
+        Profiler_RecordOperation "GanttTimelineProjectionMemoryX", 1, 0#
+        Exit Function
+    End If
+
+    dateVal = CDate(taskDate)
+
+    If IsWeekScaleMode() Then
+        periodStart = GetIsoWeekMonday(dateVal)
+        periodDays = 7
+    ElseIf IsMonthScaleMode() Then
+        periodStart = GetMonthStart(dateVal)
+        periodDays = Day(DateSerial(Year(periodStart), Month(periodStart) + 1, 0))
+    Else
+        periodStart = dateVal
+        periodDays = 1
+    End If
+
+    offsetDays = CDbl(DateDiff("d", periodStart, dateVal))
+    If isFinishSide Then offsetDays = offsetDays + 1
+
+    If offsetDays < 0 Then offsetDays = 0
+    If offsetDays > periodDays Then offsetDays = periodDays
+
+    GanttTimelineProjection_DateX = cellLeft + (cellWidth * (offsetDays / periodDays))
+    Profiler_RecordOperation "GanttTimelineProjectionMemoryX", 1, 0#
 
 End Function
 '------------------------------------------------------------------------------

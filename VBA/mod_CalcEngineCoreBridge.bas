@@ -37,6 +37,7 @@ Public Sub Run_Calc_Engine_CoreBridge(Optional ByVal forceFullRecalcOverride As 
     Dim mapWBS As Object
     Dim dataArr As Variant
     Dim linksBySuccId As Object
+    Dim executionNetwork As clsCompiledExecutionNetwork
 
     Dim changedIds As Object
     Dim forceFullRecalc As Boolean
@@ -108,13 +109,6 @@ Public Sub Run_Calc_Engine_CoreBridge(Optional ByVal forceFullRecalcOverride As 
         GoTo SafeExit
     End If
 
-    ApplyCalcDateFormats tblCalc
-
-    RebuildLogicLinksTable
-    If IsMacroAbortRequested() Then GoTo SafeExit
-
-    Set wsCalc = ThisWorkbook.Worksheets("CALC")
-    Set tblCalc = wsCalc.ListObjects("tbl_CALC")
     Set mapCalc = CanonicalIdentity_BuildColumnMap(tblCalc)
 
     FillCalcParentAndSummaryFromWBS tblCalc, tblWBS
@@ -149,20 +143,33 @@ Public Sub Run_Calc_Engine_CoreBridge(Optional ByVal forceFullRecalcOverride As 
                     "Aucune modification détectée : calcul moteur non relancé.", _
                     "No change detected: core calculation was not rerun."
 
-                CalcBridge_ShowPlanningConsole consoleMessages
+                If Not Profiler_ShouldSuppressUserInterface() Then
+                    CalcBridge_ShowPlanningConsole consoleMessages
+                End If
                 GoTo SafeExit
 
             End If
         End If
     End If
 
-    If CalcBridge_PreCore_CheckLOEAsPredecessor(tblCalc, mapCalc, consoleMessages) Then
+    ApplyCalcDateFormats tblCalc
+
+    RebuildLogicLinksTable
+    If IsMacroAbortRequested() Then GoTo SafeExit
+
+    Set wsCalc = ThisWorkbook.Worksheets("CALC")
+    Set tblCalc = wsCalc.ListObjects("tbl_CALC")
+    Set mapCalc = CanonicalIdentity_BuildColumnMap(tblCalc)
+    dataArr = tblCalc.DataBodyRange.value
+
+    Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded(tblCalc)
+    Set executionNetwork = CompileExecutionNetwork(dataArr, mapCalc, linksBySuccId)
+
+    If CalcBridge_PreCore_CheckLOEAsPredecessor(tblCalc, mapCalc, consoleMessages, linksBySuccId) Then
         Write_CalcState_Snapshot_Console "ERROR", consoleMessages
         CalcBridge_ShowPlanningConsole consoleMessages
         GoTo SafeExit
     End If
-
-    Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded(tblCalc)
 
     Set succByPred = Build_Successor_Map(linksBySuccId)
     Set parentById = BuildParentByIdMap_FromCalc(dataArr, mapCalc, Core_BuildRowById(dataArr, mapCalc))
@@ -210,7 +217,7 @@ Public Sub Run_Calc_Engine_CoreBridge(Optional ByVal forceFullRecalcOverride As 
         Debug.Print "PARTIAL CORE MODE ENABLED"
         Debug.Print "Partial impacted tasks count: " & impactedIds.Count
 
-        Run_Calc_Core dataArr, mapCalc, linksBySuccId, impactedIds
+        Run_Calc_Core dataArr, mapCalc, linksBySuccId, impactedIds, , , , executionNetwork
 
         WriteCoreOutputsToCalc_Partial tblCalc, mapCalc, dataArr, impactedIds
         WriteCoreDrivingLogicToCalc_Partial tblCalc, mapCalc, dataArr, impactedIds
@@ -219,7 +226,7 @@ Public Sub Run_Calc_Engine_CoreBridge(Optional ByVal forceFullRecalcOverride As 
 
         Debug.Print "FULL CORE MODE"
 
-        Run_Calc_Core dataArr, mapCalc, linksBySuccId
+        Run_Calc_Core dataArr, mapCalc, linksBySuccId, , , , , executionNetwork
 
         WriteCoreOutputsToCalc tblCalc, mapCalc, dataArr
         WriteCoreDrivingLogicToCalc tblCalc, mapCalc, dataArr
@@ -248,7 +255,7 @@ Public Sub Run_Calc_Engine_CoreBridge(Optional ByVal forceFullRecalcOverride As 
     'No partial analytics calculation is implemented at this stage.
 
     If runAnalytics Then
-        Run_Analytics_Only consoleMessages
+        Run_Analytics_Only consoleMessages, executionNetwork, linksBySuccId
         AbortIfRequested "Run_Calc_Engine_CoreBridge.AfterAnalytics"
     Else
         Clear_Analytics_Outputs

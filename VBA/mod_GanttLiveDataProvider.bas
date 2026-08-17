@@ -13,7 +13,7 @@ Option Explicit
 ' Reads and projects domain data without owning business policy.
 ' Does not render UI or run an engine.
 '
-' CONTRATS / CONTRACTS : GanttLive_HasAnyTestInput, ValidateGanttTestSourceColumns, FindGanttRowByWBS, GetParentIdFromWBS, GetLastGanttRow_Live, BuildCalcConstraintByIdMap_GanttLive, BuildTaskNameByIdFromWbs_Live, BuildCalcByIdMap_Live
+' CONTRATS / CONTRACTS : GanttLive_HasAnyTestInput, GanttLive_HasAnyGanttTestInputFast, BuildGanttRowByWbsMap, ValidateGanttTestSourceColumns, FindGanttRowByWBS, GetParentIdFromWBS, GetLastGanttRow_Live, BuildCalcConstraintByIdMap_GanttLive, BuildTaskNameByIdFromWbs_Live, BuildCalcByIdMap_Live
 ' CALLBACKS EXTERNES / EXTERNAL CALLBACKS : Aucun / None
 '===============================================================================
 
@@ -23,8 +23,11 @@ Private Const WBS_TABLE As String = "tbl_WBS"
 Private Const CALC_SHEET As String = "CALC"
 Private Const CALC_TABLE As String = "tbl_CALC"
 
-Private Const GANTT_FIRST_TASK_ROW As Long = 4
+Private Const GANTT_FIRST_TASK_ROW As Long = 5
 Private Const GANTT_COL_WBS As Long = 1
+Private Const GANTT_COL_TEST_START As Long = 5
+Private Const GANTT_COL_TEST_FINISH As Long = 6
+Private Const GANTT_COL_TEST_PROGRESS As Long = 9
 
 
 '------------------------------------------------------------------------------
@@ -52,7 +55,117 @@ Public Function GanttLive_HasAnyTestInput(ByVal tblTest As ListObject) As Boolea
 
 End Function
 
+'------------------------------------------------------------------------------
+' FR:
+' Detecte une hypothese TEST directement dans les trois colonnes editables du
+' Gantt. Ce preflight ne construit aucune table de simulation et ne parcourt
+' aucune shape.
+'
+' EN:
+' Detects a TEST assumption directly in the three editable Gantt columns. This
+' preflight builds no simulation table and scans no shape.
+'------------------------------------------------------------------------------
+Public Function GanttLive_HasAnyGanttTestInputFast(ByVal ws As Worksheet) As Boolean
 
+    Dim lastRow As Long
+    Dim startValues As Variant
+    Dim finishValues As Variant
+    Dim progressValues As Variant
+    Dim r As Long
+
+    If ws Is Nothing Then Exit Function
+
+    lastRow = GetLastGanttRow_Live(ws)
+    If lastRow < GANTT_FIRST_TASK_ROW Then Exit Function
+
+    startValues = ws.Range( _
+        ws.Cells(GANTT_FIRST_TASK_ROW, GANTT_COL_TEST_START), _
+        ws.Cells(lastRow, GANTT_COL_TEST_START)).Value2
+    finishValues = ws.Range( _
+        ws.Cells(GANTT_FIRST_TASK_ROW, GANTT_COL_TEST_FINISH), _
+        ws.Cells(lastRow, GANTT_COL_TEST_FINISH)).Value2
+    progressValues = ws.Range( _
+        ws.Cells(GANTT_FIRST_TASK_ROW, GANTT_COL_TEST_PROGRESS), _
+        ws.Cells(lastRow, GANTT_COL_TEST_PROGRESS)).Value2
+
+    For r = 1 To UBound(startValues, 1)
+        If HasValue(startValues(r, 1)) Or _
+           HasValue(finishValues(r, 1)) Or _
+           HasValue(progressValues(r, 1)) Then
+            GanttLive_HasAnyGanttTestInputFast = True
+            Exit Function
+        End If
+    Next r
+
+End Function
+
+
+'------------------------------------------------------------------------------
+' FR:
+' Construit en une lecture l'index WBS normalise vers ligne Gantt utilise par
+' les builders TEST et SCENARIO. L'index appartient au workflow appelant.
+'
+' EN:
+' Builds the normalized-WBS-to-Gantt-row index used by TEST and SCENARIO
+' builders in one read. The calling workflow owns the index.
+'------------------------------------------------------------------------------
+Public Function BuildGanttRowByWbsMap(ByVal ws As Worksheet) As Object
+
+    Dim result As Object
+    Dim lastRow As Long
+    Dim values As Variant
+    Dim wbsValues As Variant
+    Dim tblWBS As ListObject
+    Dim wbsColumnIndex As Long
+    Dim r As Long
+    Dim wbsVal As String
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    If ws Is Nothing Then
+        Set BuildGanttRowByWbsMap = result
+        Exit Function
+    End If
+
+    lastRow = GetLastGanttRow_Live(ws)
+    If lastRow < GANTT_FIRST_TASK_ROW Then
+        Set BuildGanttRowByWbsMap = result
+        Exit Function
+    End If
+
+    values = ws.Range( _
+        ws.Cells(GANTT_FIRST_TASK_ROW, GANTT_COL_WBS), _
+        ws.Cells(lastRow, GANTT_COL_WBS)).Value2
+
+    For r = 1 To UBound(values, 1)
+        wbsVal = NormalizeWBS(CStr(values(r, 1)))
+        If wbsVal <> "" Then
+            If Not result.Exists(wbsVal) Then result(wbsVal) = GANTT_FIRST_TASK_ROW + r - 1
+        End If
+    Next r
+
+    On Error Resume Next
+    Set tblWBS = ThisWorkbook.Worksheets(WBS_SHEET).ListObjects(WBS_TABLE)
+    On Error GoTo 0
+
+    If Not tblWBS Is Nothing Then
+        If Not tblWBS.DataBodyRange Is Nothing Then
+            wbsColumnIndex = tblWBS.ListColumns("WBS").Index
+            wbsValues = tblWBS.DataBodyRange.Columns(wbsColumnIndex).Value2
+
+            For r = 1 To UBound(wbsValues, 1)
+                wbsVal = NormalizeWBS(CStr(wbsValues(r, 1)))
+                If wbsVal <> "" Then
+                    If Not result.Exists(wbsVal) Then result(wbsVal) = GANTT_FIRST_TASK_ROW + r - 1
+                End If
+            Next r
+        End If
+    End If
+
+    Set BuildGanttRowByWbsMap = result
+
+End Function
 
 '------------------------------------------------------------------------------
 ' FR: Verifie les colonnes WBS/CALC indispensables a la construction d'un dataset TEST.
@@ -556,6 +669,4 @@ Public Function BuildRawWbsSourceById_Live() As Object
     Set BuildRawWbsSourceById_Live = d
 
 End Function
-
-
 

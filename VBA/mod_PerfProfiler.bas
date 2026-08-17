@@ -218,6 +218,33 @@ End Sub
 ' EN: Writes or synchronizes Profiler Record Operation in the store owned by the domain.
 '------------------------------------------------------------------------------
 
+Public Sub Profiler_RecordCounter( _
+    ByVal counterName As String, _
+    ByVal counterValue As Long)
+
+    Dim key As String
+    Dim statsData As Variant
+
+    If Not Profiler_IsEnabled() Then Exit Sub
+    If counterValue < 1 Then Exit Sub
+
+    key = "Counter|" & counterName
+    If gStats.Exists(key) Then
+        statsData = gStats(key)
+    Else
+        statsData = Array(counterName, "Counter", CLng(0), 0#, 0#, 0#, 0#)
+    End If
+
+    statsData(2) = CLng(statsData(2)) + counterValue
+    gStats(key) = statsData
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Ecrit ou synchronise Profiler Record Operation dans le stockage possede par le domaine.
+' EN: Writes or synchronizes Profiler Record Operation in the store owned by the domain.
+'------------------------------------------------------------------------------
+
 Public Sub Profiler_RecordOperation( _
     ByVal operationName As String, _
     Optional ByVal callCount As Long = 1, _

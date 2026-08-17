@@ -56,6 +56,7 @@ Public Sub GanttScenarioService_RunScenarioEngine( _
     Dim wbsToId As Object
     Dim calcById As Object
     Dim calcRowById As Object
+    Dim ganttRowByWbs As Object
 
     Dim dataWBS As Variant
     Dim dataCalc As Variant
@@ -101,6 +102,7 @@ Public Sub GanttScenarioService_RunScenarioEngine( _
     Set consoleMessages = New Collection
 
     Set wsGantt = ThisWorkbook.Worksheets(GANTT_SHEET)
+
     Set wsWBS = ThisWorkbook.Worksheets(WBS_SHEET)
     Set wsCalc = ThisWorkbook.Worksheets(CALC_SHEET)
 
@@ -119,6 +121,7 @@ Public Sub GanttScenarioService_RunScenarioEngine( _
     Set wbsToId = CanonicalIdentity_GetWbsToIdMap()
     Set calcById = BuildCalcByIdMap_Live(tblCalc, mapCalc)
     Set calcRowById = CreateObject("Scripting.Dictionary")
+    Set ganttRowByWbs = BuildGanttRowByWbsMap(wsGantt)
 
     ValidateGanttTestSourceColumns mapWBS, mapCalc
     ValidateCalcGanttTestColumns tblTest
@@ -199,7 +202,8 @@ Public Sub GanttScenarioService_RunScenarioEngine( _
         inputProgress = Empty
         anyTestValue = False
 
-        ganttRow = FindGanttRowByWBS(wsGantt, wbsVal)
+        ganttRow = 0
+        If ganttRowByWbs.Exists(wbsVal) Then ganttRow = CLng(ganttRowByWbs(wbsVal))
 
         If ganttRow > 0 Then
             testStart = GetCellValue(wsGantt.Cells(ganttRow, COL_TEST_START).value)
@@ -354,6 +358,7 @@ Private Function Run_Gantt_Scenario_Backend( _
     Dim dataCore As Variant
     Dim mapCore As Object
     Dim linksBySuccId As Object
+    Dim executionNetwork As clsCompiledExecutionNetwork
 
     Dim outStart() As Variant
     Dim outFinish() As Variant
@@ -408,8 +413,9 @@ Private Function Run_Gantt_Scenario_Backend( _
 
     Set linksBySuccId = BuildCoreLinksBySucc_FromLogicLinksTable_Expanded( _
         ThisWorkbook.Worksheets(CALC_SHEET).ListObjects(CALC_TABLE))
+    Set executionNetwork = CompileExecutionNetwork(dataCore, mapCore, linksBySuccId)
 
-    Run_Calc_Core dataCore, mapCore, linksBySuccId, , dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics
+    Run_Calc_Core dataCore, mapCore, linksBySuccId, , dependencyDiagnostics, constraintDiagnostics, cascadeDiagnostics, executionNetwork
 
     For r = 1 To rowCount
 
@@ -585,8 +591,12 @@ Private Sub BuildGanttScenarioCoreDataset( _
             inputStart = testStart
         End If
 
-        If HasValue(testStart) And HasValue(testFinish) Then
-            inputDuration = CDbl(testFinish) - CDbl(testStart) + 1
+        If HasValue(testFinish) Then
+            If HasValue(testStart) Then
+                inputDuration = CDbl(testFinish) - CDbl(testStart) + 1
+            ElseIf HasValue(inputDuration) Then
+                inputStart = SubtractWorkingDays(testFinish, inputDuration, arrTest(r, GetColumnIndex_GanttLive(tblTest, "Cal")))
+            End If
         End If
 
         If HasValue(testProgress) Then
@@ -636,7 +646,9 @@ Private Sub GanttLive_ApplyScenarioRender(ByVal wsGantt As Worksheet)
 
     SetGanttPreserveTestInputs True
     GanttLive_RequestScenarioRender
-    Refresh_Gantt
+    If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_LOCAL_UPDATE, "GanttLive_ApplyScenarioRender") Then
+        Err.Raise 5, "GanttLive_ApplyScenarioRender", "Gantt SCENARIO render did not reach READY state."
+    End If
     GanttLive_SetActiveSimulationMode "SCENARIO"
     SetGanttPreserveTestInputs False
 
@@ -645,3 +657,5 @@ Private Sub GanttLive_ApplyScenarioRender(ByVal wsGantt As Worksheet)
     End If
 
 End Sub
+
+

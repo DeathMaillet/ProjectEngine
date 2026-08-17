@@ -579,7 +579,8 @@ End Function
 Public Function CalcBridge_BuildAnalyticsSnapshotById( _
     ByRef dataArr As Variant, _
     ByVal mapCalc As Object, _
-    ByVal linksBySuccId As Object) As Object
+    ByVal linksBySuccId As Object, _
+    Optional ByVal executionNetwork As clsCompiledExecutionNetwork) As Object
 
     Dim perfScope As clsPerfScope
     Dim result As Object
@@ -592,6 +593,7 @@ Public Function CalcBridge_BuildAnalyticsSnapshotById( _
     Dim topoOrder As Collection
     Dim analyticsPredLagBySuccPred As Object
     Dim analyticsPredTypeBySuccPred As Object
+    Dim sharedNetworkFinishById As Object
     Dim outTotalFloat As Variant
     Dim outFreeFloat As Variant
     Dim outCriticalPath As Variant
@@ -605,26 +607,32 @@ Public Function CalcBridge_BuildAnalyticsSnapshotById( _
     If mapCalc Is Nothing Then GoTo SafeExit
     If linksBySuccId Is Nothing Then GoTo SafeExit
 
-    Set rowById = Core_BuildRowById(dataArr, mapCalc)
-    Set parentIds = Core_BuildParentIds(dataArr, mapCalc, rowById)
-    Set validIds = CalcBridge_BuildLeafIds(rowById, parentIds, dataArr, mapCalc)
-    Set directChildrenById = CalcBridge_BuildDirectChildrenById(dataArr, mapCalc, rowById)
-    Set predsById = CalcBridge_BuildEmptyCollections(validIds)
-    Set childrenById = CalcBridge_BuildEmptyCollections(validIds)
+    If executionNetwork Is Nothing Then
+        Set executionNetwork = CompileExecutionNetwork(dataArr, mapCalc, linksBySuccId)
+    End If
 
-    CalcBridge_BuildAnalyticsNetworkFromExpandedLinks linksBySuccId, validIds, predsById, childrenById, _
-        analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred
-    Set topoOrder = CalcBridge_TopologicalOrder(validIds, predsById, childrenById)
+    Set rowById = executionNetwork.RowById
+    Set parentIds = executionNetwork.ParentIds
+    Set validIds = executionNetwork.ValidLeafIds
+    Set directChildrenById = executionNetwork.DirectChildrenById
+    Set predsById = executionNetwork.AnalyticsPredsById
+    Set childrenById = executionNetwork.AnalyticsChildrenById
+    Set analyticsPredLagBySuccPred = executionNetwork.PredLagBySuccPred
+    Set analyticsPredTypeBySuccPred = executionNetwork.PredTypeBySuccPred
+    Set topoOrder = executionNetwork.TopoOrder
     If topoOrder.Count <> validIds.Count Then GoTo SafeExit
+    If IsCriticalPathMultiNetworkEnabled() Then
+        Set sharedNetworkFinishById = CompiledNetwork_BuildCurrentFinishById(executionNetwork, dataArr, mapCalc)
+    End If
 
     ComputeCurrentFloatAndCritical _
         Nothing, mapCalc, rowById, childrenById, directChildrenById, parentIds, validIds, topoOrder, _
         Nothing, analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, _
-        dataArr, outTotalFloat, outFreeFloat, outCriticalPath
+        dataArr, outTotalFloat, outFreeFloat, outCriticalPath, sharedNetworkFinishById
 
     ComputeLongestPath _
         Nothing, mapCalc, rowById, predsById, childrenById, validIds, _
-        analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, dataArr, outLongestPath
+        analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, dataArr, outLongestPath, sharedNetworkFinishById
 
     For Each idKey In rowById.Keys
         rowIndex = CLng(rowById(CStr(idKey)))
@@ -645,7 +653,8 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
     ByVal tblCalc As ListObject, _
     ByVal mapCalc As Object, _
     ByVal linksBySuccId As Object, _
-    Optional ByVal consoleMessages As Collection)
+    Optional ByVal consoleMessages As Collection, _
+    Optional ByVal executionNetwork As clsCompiledExecutionNetwork)
 
     Dim perfScope As clsPerfScope
 
@@ -662,6 +671,13 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
     Dim errMissingBaselineForREX As Object
     Dim analyticsPredLagBySuccPred As Object
     Dim analyticsPredTypeBySuccPred As Object
+    Dim sharedNetworkFinishById As Object
+    Dim sharedRexNetworkFinishById As Object
+    Dim rexStartById As Object
+    Dim rexFinishById As Object
+    Dim rexDurationById As Object
+    Dim rexDiagnosticsById As Object
+    Dim rexDataArr As Variant
 
     Set perfScope = Profiler_BeginScope("CalcBridge_RunAnalyticsAndPush", "Analytics")
 
@@ -673,20 +689,25 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
 
     dataArr = tblCalc.DataBodyRange.value
 
-    Set rowById = Core_BuildRowById(dataArr, mapCalc)
-    Set parentIds = Core_BuildParentIds(dataArr, mapCalc, rowById)
+    If executionNetwork Is Nothing Then
+        Set executionNetwork = CompileExecutionNetwork(dataArr, mapCalc, linksBySuccId)
+    End If
 
-    Set validIds = CalcBridge_BuildLeafIds(rowById, parentIds, dataArr, mapCalc)
-
-    Set directChildrenById = CalcBridge_BuildDirectChildrenById(dataArr, mapCalc, rowById)
-    Set predsById = CalcBridge_BuildEmptyCollections(validIds)
-    Set childrenById = CalcBridge_BuildEmptyCollections(validIds)
-    Set idToWbs = CalcBridge_BuildIdToWbsFromData(dataArr, mapCalc, rowById)
+    Set rowById = executionNetwork.RowById
+    Set parentIds = executionNetwork.ParentIds
+    Set validIds = executionNetwork.ValidLeafIds
+    Set directChildrenById = executionNetwork.DirectChildrenById
+    Set predsById = executionNetwork.AnalyticsPredsById
+    Set childrenById = executionNetwork.AnalyticsChildrenById
+    Set idToWbs = executionNetwork.IdToWbs
     Set errMissingBaselineForREX = CreateObject("Scripting.Dictionary")
+    Set analyticsPredLagBySuccPred = executionNetwork.PredLagBySuccPred
+    Set analyticsPredTypeBySuccPred = executionNetwork.PredTypeBySuccPred
+    Set topoOrder = executionNetwork.TopoOrder
 
-    CalcBridge_BuildAnalyticsNetworkFromExpandedLinks linksBySuccId, validIds, predsById, childrenById, _
-        analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred
-    Set topoOrder = CalcBridge_TopologicalOrder(validIds, predsById, childrenById)
+    If IsCriticalPathMultiNetworkEnabled() Then
+        Set sharedNetworkFinishById = CompiledNetwork_BuildCurrentFinishById(executionNetwork, dataArr, mapCalc)
+    End If
 
     If topoOrder.Count <> validIds.Count Then
 
@@ -697,18 +718,44 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
 
     ComputeCurrentFloatAndCritical _
         tblCalc, mapCalc, rowById, childrenById, directChildrenById, parentIds, validIds, topoOrder, _
-        consoleMessages, analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred
+        consoleMessages, analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, , , , , sharedNetworkFinishById
 
     ReDim outCriticalREX(1 To tblCalc.ListRows.Count, 1 To 1)
 
     ComputeLongestPath _
         tblCalc, mapCalc, rowById, predsById, childrenById, validIds, _
-        analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred
+        analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, , , sharedNetworkFinishById
 
     ComputeCriticalPathREX _
         tblCalc, mapCalc, rowById, predsById, childrenById, directChildrenById, _
         parentIds, validIds, topoOrder, idToWbs, outCriticalREX, errMissingBaselineForREX, _
-        consoleMessages, analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred
+        consoleMessages, analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, executionNetwork
+
+    If mapCalc.Exists("Longest Path REX") And errMissingBaselineForREX.Count = 0 Then
+        Set rexStartById = CreateObject("Scripting.Dictionary")
+        Set rexFinishById = CreateObject("Scripting.Dictionary")
+        Set rexDurationById = CreateObject("Scripting.Dictionary")
+        Set rexDiagnosticsById = CreateObject("Scripting.Dictionary")
+        rexDataArr = dataArr
+
+        If BuildBaselineRexTemporalState( _
+            rexDataArr, mapCalc, rowById, predsById, validIds, topoOrder, _
+            analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, _
+            rexStartById, rexFinishById, rexDurationById, rexDiagnosticsById) Then
+
+            ApplyBaselineRexTemporalStateToArray _
+                rexDataArr, mapCalc, rowById, rexStartById, rexFinishById, rexDurationById
+
+            If IsCriticalPathMultiNetworkEnabled() Then
+                Set sharedRexNetworkFinishById = CalcBridge_BuildFinishByIdFromColumn(rexDataArr, mapCalc, rowById, validIds, "Baseline Finish", False, executionNetwork)
+            End If
+
+            ComputeLongestPath _
+                tblCalc, mapCalc, rowById, predsById, childrenById, validIds, _
+                analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, rexDataArr, , sharedRexNetworkFinishById, _
+                "Baseline Start", "Baseline Finish", "Longest Path REX", False
+        End If
+    End If
 
     If errMissingBaselineForREX.Count > 0 Then
         If consoleMessages Is Nothing Then
@@ -729,6 +776,66 @@ ErrHandler:
 
 End Sub
 
+'------------------------------------------------------------------------------
+' FR: Construit une map finish par ID pour l'etat temporel fourni, avec projection par composante compilee si disponible.
+' EN: Builds a finish-by-ID map for the supplied temporal state, using compiled component projection when available.
+'------------------------------------------------------------------------------
+Private Function CalcBridge_BuildFinishByIdFromColumn( _
+    ByRef dataArr As Variant, _
+    ByVal mapCalc As Object, _
+    ByVal rowById As Object, _
+    ByVal validIds As Object, _
+    ByVal finishColumnName As String, _
+    ByVal excludeActualFinished As Boolean, _
+    Optional ByVal executionNetwork As clsCompiledExecutionNetwork) As Object
+
+    Dim rawFinishById As Object
+    Dim idKey As Variant
+    Dim taskId As String
+    Dim rowIndex As Long
+    Dim finishVal As Variant
+
+    Set rawFinishById = CreateObject("Scripting.Dictionary")
+
+    If mapCalc Is Nothing Then GoTo SafeExit
+    If rowById Is Nothing Then GoTo SafeExit
+    If validIds Is Nothing Then GoTo SafeExit
+    If Not mapCalc.Exists(finishColumnName) Then GoTo SafeExit
+
+    For Each idKey In validIds.Keys
+        taskId = CStr(idKey)
+        If rowById.Exists(taskId) Then
+            rowIndex = CLng(rowById(taskId))
+            If (Not excludeActualFinished) Or Not CalcBridge_IsActualFinishedInCalcArray(dataArr, rowIndex, mapCalc) Then
+                finishVal = GetCellValue(dataArr(rowIndex, mapCalc(finishColumnName)))
+                If HasValue(finishVal) Then rawFinishById(taskId) = finishVal
+            End If
+        End If
+    Next idKey
+
+SafeExit:
+    If Not executionNetwork Is Nothing Then
+        Set CalcBridge_BuildFinishByIdFromColumn = CompiledNetwork_BuildFinishByIdFromValues(executionNetwork, rawFinishById)
+    Else
+        Set CalcBridge_BuildFinishByIdFromColumn = rawFinishById
+    End If
+
+End Function
+'------------------------------------------------------------------------------
+' FR: Indique si la ligne CALC porte un Actual Finish exploitable.
+' EN: Returns whether the CALC row has a usable Actual Finish.
+'------------------------------------------------------------------------------
+Private Function CalcBridge_IsActualFinishedInCalcArray( _
+    ByRef dataArr As Variant, _
+    ByVal rowIndex As Long, _
+    ByVal mapCalc As Object) As Boolean
+
+    If mapCalc Is Nothing Then Exit Function
+    If Not mapCalc.Exists("Actual Finish") Then Exit Function
+
+    CalcBridge_IsActualFinishedInCalcArray = HasValue(GetCellValue(dataArr(rowIndex, mapCalc("Actual Finish"))))
+
+End Function
 '------------------------------------------------------------------------------
 ' FR: Construit la collection Leaf IDs a partir des donnees fournies par l'appelant.
 ' EN: Builds the Leaf IDs collection from data supplied by the caller.

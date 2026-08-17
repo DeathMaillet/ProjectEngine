@@ -28,6 +28,12 @@ Option Explicit
     Private Declare PtrSafe Function KillTimer Lib "user32" ( _
         ByVal hwnd As LongPtr, _
         ByVal nIDEvent As LongPtr) As Long
+
+    Private Declare PtrSafe Function QueryPerformanceCounter Lib "kernel32" ( _
+        ByRef lpPerformanceCount As Currency) As Long
+
+    Private Declare PtrSafe Function QueryPerformanceFrequency Lib "kernel32" ( _
+        ByRef lpFrequency As Currency) As Long
 #Else
     Private Declare Function SetTimer Lib "user32" ( _
         ByVal hwnd As Long, _
@@ -38,6 +44,12 @@ Option Explicit
     Private Declare Function KillTimer Lib "user32" ( _
         ByVal hwnd As Long, _
         ByVal nIDEvent As Long) As Long
+
+    Private Declare Function QueryPerformanceCounter Lib "kernel32" ( _
+        ByRef lpPerformanceCount As Currency) As Long
+
+    Private Declare Function QueryPerformanceFrequency Lib "kernel32" ( _
+        ByRef lpFrequency As Currency) As Long
 #End If
 
 Private Const GANTT_DRAG_SHEET As String = "GANTT"
@@ -66,11 +78,40 @@ Private gSuspendDepth As Long
 Private gStructuralErrorCount As Long
 Private gShapeState As Object
 Private gLayoutSignature As String
+Private gLayoutState(0 To 11) As Double
+Private gHasLayoutState As Boolean
 Private gLastDebugStatus As String
 Private gTransactionActive As Boolean
 Private gLastTransactionResult As String
 Private gLastWrittenCells As String
 Private gTransactionCount As Long
+
+Private gMetricsEnabled As Boolean
+Private gMetricTicks As Long
+Private gMetricIdleTicks As Long
+Private gMetricDeltaTicks As Long
+Private gMetricActionTicks As Long
+Private gMetricBusySkips As Long
+Private gMetricReentrantSkips As Long
+Private gMetricSuspendedSkips As Long
+Private gMetricLayoutReconciles As Long
+Private gMetricMapRebuilds As Long
+Private gMetricMapShapesInspected As Long
+Private gMetricTickShapesInspected As Long
+Private gMetricLayoutReads As Long
+Private gMetricGeometryReads As Long
+Private gMetricCellsRead As Long
+Private gMetricExcelWrites As Long
+Private gMetricEngineCalls As Long
+Private gMetricRendererCalls As Long
+Private gMetricFallbacks As Long
+Private gMetricStructuralErrors As Long
+Private gMetricTotalMs As Double
+Private gMetricMaxMs As Double
+Private gMetricLastMs As Double
+Private gMetricLayoutMs As Double
+Private gMetricSelectionMs As Double
+Private gMetricGeometryMs As Double
 
 '------------------------------------------------------------------------------
 ' FR: Recoit le callback externe GanttDrag_StartWatch et le relaie vers le workflow proprietaire.
@@ -81,6 +122,49 @@ Public Sub GanttDrag_StartWatch()
 
     gWatchRequested = True
     GanttDrag_StartRuntime
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Reprend le watcher sans detruire son runtime si le timer existe deja.
+' EN: Resumes the watcher without destroying runtime when the timer already exists.
+'------------------------------------------------------------------------------
+Public Sub GanttDrag_ResumeWatch()
+
+    GanttDrag_EnsureArmed
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Garantit que le watcher est arme quand GANTT est actif, sans reset inutile.
+' EN: Ensures the watcher is armed when GANTT is active, without unnecessary reset.
+'------------------------------------------------------------------------------
+Public Sub GanttDrag_EnsureArmed()
+
+    gWatchRequested = True
+    If Not GanttDrag_CanStartWatch() Then
+        GanttDrag_StopRuntime False, False
+        Exit Sub
+    End If
+
+    If GanttDrag_IsWatching() Then
+        gSuspendDepth = 0
+        gInTick = False
+        gTransactionActive = False
+        GanttDrag_RebuildWatchMaps
+    Else
+        GanttDrag_StartRuntime
+    End If
+
+    GanttDrag_PrimeLocalPathForFirstInteraction
+
+End Sub
+
+Private Sub GanttDrag_PrimeLocalPathForFirstInteraction()
+
+    On Error Resume Next
+    GanttLocal_PrimeNormalState
+    On Error GoTo 0
 
 End Sub
 
@@ -108,11 +192,13 @@ Public Sub GanttDrag_RebuildWatchMaps()
     Dim taskType As String
 
     Set gShapeState = CreateObject("Scripting.Dictionary")
+    If gMetricsEnabled Then gMetricMapRebuilds = gMetricMapRebuilds + 1
 
     If Not GanttDrag_IsGanttSheetActive(ws) Then Exit Sub
     If Not GanttDrag_IsSupportedTimelineScale() Then Exit Sub
 
     For Each shp In ws.Shapes
+        If gMetricsEnabled Then gMetricMapShapesInspected = gMetricMapShapesInspected + 1
         rowIndex = 0
         taskType = vbNullString
 
@@ -121,6 +207,7 @@ Public Sub GanttDrag_RebuildWatchMaps()
         End If
     Next shp
 
+    GanttDrag_CaptureLayoutState ws
     gLayoutSignature = GanttDrag_BuildLayoutSignature(ws)
 
 End Sub
@@ -289,6 +376,7 @@ Private Sub GanttDrag_StopRuntime( _
 
     Set gShapeState = Nothing
     gLayoutSignature = vbNullString
+    gHasLayoutState = False
     If clearRequest Then gWatchRequested = False
 
     If showStatus Then Debug.Print "Gantt Drag Watch stopped."
@@ -321,26 +409,253 @@ Private Sub GanttDrag_TimerProc( _
 
     On Error GoTo StructuralError
 
-    If Not gWatchEnabled Then Exit Sub
-    If gInTick Then Exit Sub
-    If gSuspendDepth > 0 Then Exit Sub
-
-    gInTick = True
-    GanttDrag_WatchTick
+    GanttDrag_RunGuardedTick
     gStructuralErrorCount = 0
-
-SafeExit:
-    gInTick = False
     Exit Sub
 
 StructuralError:
+    GanttDrag_RecordStructuralError
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Enregistre une erreur structurelle et coupe le watcher apres erreurs repetees.
+' EN: Records a structural error and stops the watcher after repeated failures.
+'------------------------------------------------------------------------------
+Private Sub GanttDrag_RecordStructuralError()
+
     gStructuralErrorCount = gStructuralErrorCount + 1
+    If gMetricsEnabled Then
+        gMetricStructuralErrors = gMetricStructuralErrors + 1
+        gMetricFallbacks = gMetricFallbacks + 1
+    End If
     If gStructuralErrorCount >= GANTT_DRAG_MAX_STRUCTURAL_ERRORS Then
         GanttDrag_StopRuntime True, False
     End If
-    Resume SafeExit
+    gInTick = False
 
 End Sub
+
+'------------------------------------------------------------------------------
+' FR: Applique les gardes de reentrance et mesure un tick sans empiler de timer.
+' EN: Applies reentrancy guards and measures one tick without stacking timers.
+'------------------------------------------------------------------------------
+Private Sub GanttDrag_RunGuardedTick(Optional ByVal requireEnabledRuntime As Boolean = True)
+
+    Dim startedAt As Double
+    Dim elapsedMs As Double
+
+    If requireEnabledRuntime Then
+        If Not gWatchEnabled Then Exit Sub
+    End If
+    If gInTick Then
+        If gMetricsEnabled Then gMetricReentrantSkips = gMetricReentrantSkips + 1
+        Exit Sub
+    End If
+    If gSuspendDepth > 0 Then
+        If gMetricsEnabled Then gMetricSuspendedSkips = gMetricSuspendedSkips + 1
+        Exit Sub
+    End If
+
+    If gMetricsEnabled Then
+        gMetricTicks = gMetricTicks + 1
+        startedAt = GanttDrag_PerformanceNowMs()
+    End If
+
+    gInTick = True
+    On Error GoTo SafeExit
+    GanttDrag_WatchTick
+
+SafeExit:
+    gInTick = False
+    If gMetricsEnabled Then
+        elapsedMs = GanttDrag_PerformanceNowMs() - startedAt
+        gMetricLastMs = elapsedMs
+        gMetricTotalMs = gMetricTotalMs + elapsedMs
+        If elapsedMs > gMetricMaxMs Then gMetricMaxMs = elapsedMs
+    End If
+    If Err.Number <> 0 Then Err.Raise Err.Number, Err.Source, Err.Description
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Retourne un temps haute resolution en millisecondes pour l'instrumentation.
+' EN: Returns a high-resolution millisecond timestamp for instrumentation.
+'------------------------------------------------------------------------------
+Private Function GanttDrag_PerformanceNowMs() As Double
+
+    Static frequency As Currency
+    Dim counter As Currency
+
+    If frequency = 0 Then QueryPerformanceFrequency frequency
+    QueryPerformanceCounter counter
+    If frequency <> 0 Then
+        GanttDrag_PerformanceNowMs = (CDbl(counter) / CDbl(frequency)) * 1000#
+    End If
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Reinitialise les compteurs de preuve du watcher sans modifier son lifecycle.
+' EN: Resets watcher proof counters without changing its lifecycle.
+'------------------------------------------------------------------------------
+Public Sub GanttDragHarness_ResetMetrics(Optional ByVal enableMetrics As Boolean = True)
+
+    gMetricsEnabled = enableMetrics
+    gMetricTicks = 0
+    gMetricIdleTicks = 0
+    gMetricDeltaTicks = 0
+    gMetricActionTicks = 0
+    gMetricBusySkips = 0
+    gMetricReentrantSkips = 0
+    gMetricSuspendedSkips = 0
+    gMetricLayoutReconciles = 0
+    gMetricMapRebuilds = 0
+    gMetricMapShapesInspected = 0
+    gMetricTickShapesInspected = 0
+    gMetricLayoutReads = 0
+    gMetricGeometryReads = 0
+    gMetricCellsRead = 0
+    gMetricExcelWrites = 0
+    gMetricEngineCalls = 0
+    gMetricRendererCalls = 0
+    gMetricFallbacks = 0
+    gMetricStructuralErrors = 0
+    gMetricTotalMs = 0#
+    gMetricMaxMs = 0#
+    gMetricLastMs = 0#
+    gMetricLayoutMs = 0#
+    gMetricSelectionMs = 0#
+    gMetricGeometryMs = 0#
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Execute un tick garde pour les harnais sans creer de second timer.
+' EN: Runs one guarded harness tick without creating a second timer.
+'------------------------------------------------------------------------------
+Public Sub GanttDragHarness_RunTick()
+
+    GanttDrag_RunGuardedTick False
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Prouve que la garde de reentrance absorbe un tick concurrent.
+' EN: Proves that the reentrancy guard absorbs a concurrent tick.
+'------------------------------------------------------------------------------
+Public Sub GanttDragHarness_ProbeReentrance()
+
+    Dim oldInTick As Boolean
+
+    oldInTick = gInTick
+    gInTick = True
+    GanttDrag_RunGuardedTick False
+    gInTick = oldInTick
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Injecte une erreur structurelle pour prouver le fallback sans erreur runtime.
+' EN: Injects one structural error to prove fallback handling without a runtime fault.
+'------------------------------------------------------------------------------
+Public Sub GanttDragHarness_ProbeStructuralError()
+
+    GanttDrag_RecordStructuralError
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Invalide la watch map afin de tester sa reconstruction au prochain tick.
+' EN: Invalidates the watch map so the next tick can prove automatic recovery.
+'------------------------------------------------------------------------------
+Public Sub GanttDragHarness_InvalidateWatchMap()
+
+    Set gShapeState = Nothing
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Expose une metrique nommee en lecture seule au harnais permanent.
+' EN: Exposes one named read-only metric to the permanent harness.
+'------------------------------------------------------------------------------
+Public Function GanttDragHarness_GetMetric(ByVal metricName As String) As Double
+
+    Select Case UCase$(Trim$(metricName))
+        Case "TICKS": GanttDragHarness_GetMetric = gMetricTicks
+        Case "IDLE_TICKS": GanttDragHarness_GetMetric = gMetricIdleTicks
+        Case "DELTA_TICKS": GanttDragHarness_GetMetric = gMetricDeltaTicks
+        Case "ACTION_TICKS": GanttDragHarness_GetMetric = gMetricActionTicks
+        Case "BUSY_SKIPS": GanttDragHarness_GetMetric = gMetricBusySkips
+        Case "REENTRANT_SKIPS": GanttDragHarness_GetMetric = gMetricReentrantSkips
+        Case "SUSPENDED_SKIPS": GanttDragHarness_GetMetric = gMetricSuspendedSkips
+        Case "LAYOUT_RECONCILES": GanttDragHarness_GetMetric = gMetricLayoutReconciles
+        Case "MAP_REBUILDS": GanttDragHarness_GetMetric = gMetricMapRebuilds
+        Case "MAP_SHAPES_INSPECTED": GanttDragHarness_GetMetric = gMetricMapShapesInspected
+        Case "TICK_SHAPES_INSPECTED": GanttDragHarness_GetMetric = gMetricTickShapesInspected
+        Case "LAYOUT_READS": GanttDragHarness_GetMetric = gMetricLayoutReads
+        Case "GEOMETRY_READS": GanttDragHarness_GetMetric = gMetricGeometryReads
+        Case "CELLS_READ": GanttDragHarness_GetMetric = gMetricCellsRead
+        Case "EXCEL_WRITES": GanttDragHarness_GetMetric = gMetricExcelWrites
+        Case "ENGINE_CALLS": GanttDragHarness_GetMetric = gMetricEngineCalls
+        Case "RENDERER_CALLS": GanttDragHarness_GetMetric = gMetricRendererCalls
+        Case "FALLBACKS": GanttDragHarness_GetMetric = gMetricFallbacks
+        Case "STRUCTURAL_ERRORS": GanttDragHarness_GetMetric = gMetricStructuralErrors
+        Case "TOTAL_MS": GanttDragHarness_GetMetric = gMetricTotalMs
+        Case "MAX_MS": GanttDragHarness_GetMetric = gMetricMaxMs
+        Case "LAST_MS": GanttDragHarness_GetMetric = gMetricLastMs
+        Case "LAYOUT_MS": GanttDragHarness_GetMetric = gMetricLayoutMs
+        Case "SELECTION_MS": GanttDragHarness_GetMetric = gMetricSelectionMs
+        Case "GEOMETRY_MS": GanttDragHarness_GetMetric = gMetricGeometryMs
+        Case "WATCHED_SHAPES"
+            If Not gShapeState Is Nothing Then GanttDragHarness_GetMetric = gShapeState.Count
+        Case "TIMER_ACTIVE": GanttDragHarness_GetMetric = IIf(gTimerId <> 0, 1, 0)
+        Case "SUSPEND_DEPTH": GanttDragHarness_GetMetric = gSuspendDepth
+        Case "TRANSACTIONS": GanttDragHarness_GetMetric = gTransactionCount
+    End Select
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne un nom r√©ellement surveill√© pour les sc√©narios du harnais.
+' EN: Returns one actually watched name for harness scenarios.
+'------------------------------------------------------------------------------
+Public Function GanttDragHarness_FirstWatchedShapeName() As String
+
+    Dim shapeName As Variant
+
+    If gShapeState Is Nothing Then Exit Function
+    For Each shapeName In gShapeState.Keys
+        GanttDragHarness_FirstWatchedShapeName = CStr(shapeName)
+        Exit Function
+    Next shapeName
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne une t√¢che standard surveill√©e pour tester le resize horizontal.
+' EN: Returns one watched standard task for horizontal resize testing.
+'------------------------------------------------------------------------------
+Public Function GanttDragHarness_FirstWatchedTaskShapeName() As String
+
+    Dim shapeName As Variant
+
+    If gShapeState Is Nothing Then Exit Function
+    For Each shapeName In gShapeState.Keys
+        If Left$(CStr(shapeName), 5) = "TASK_" Then
+            GanttDragHarness_FirstWatchedTaskShapeName = CStr(shapeName)
+            Exit Function
+        End If
+    Next shapeName
+
+End Function
+
+Public Function GanttDragHarness_IsShapeWatched(ByVal shapeName As String) As Boolean
+
+    If gShapeState Is Nothing Then Exit Function
+    GanttDragHarness_IsShapeWatched = gShapeState.Exists(CStr(shapeName))
+
+End Function
 
 '------------------------------------------------------------------------------
 ' FR: Traite la reference Watch Tick sans modifier les donnees d'entree.
@@ -352,11 +667,13 @@ End Sub
 Private Sub GanttDrag_WatchTick()
 
     Dim ws As Worksheet
-    Dim shapeName As Variant
     Dim shp As Shape
     Dim state As Variant
     Dim geometryChanged As Boolean
-    Dim currentLayoutSignature As String
+    Dim shapeName As String
+    Dim newLeft As Double
+    Dim newRight As Double
+    Dim phaseStartedAt As Double
 
     If Not GanttDrag_IsGanttSheetActive(ws) Then
         GanttDrag_StopRuntime False, False
@@ -368,9 +685,18 @@ Private Sub GanttDrag_WatchTick()
         Exit Sub
     End If
 
-    If IsPlanningWorkflowActive() Then Exit Sub
-    If GetGanttInternalWrite() Then Exit Sub
-    If Application.CalculationState <> xlDone Then Exit Sub
+    If IsPlanningWorkflowActive() Then
+        If gMetricsEnabled Then gMetricBusySkips = gMetricBusySkips + 1
+        Exit Sub
+    End If
+    If GetGanttInternalWrite() Then
+        If gMetricsEnabled Then gMetricBusySkips = gMetricBusySkips + 1
+        Exit Sub
+    End If
+    If Application.CalculationState <> xlDone Then
+        If gMetricsEnabled Then gMetricBusySkips = gMetricBusySkips + 1
+        Exit Sub
+    End If
 
     If gShapeState Is Nothing Then GanttDrag_RebuildWatchMaps
     If gShapeState Is Nothing Then Exit Sub
@@ -379,44 +705,63 @@ Private Sub GanttDrag_WatchTick()
         Exit Sub
     End If
 
-    currentLayoutSignature = GanttDrag_BuildLayoutSignature(ws)
-    If currentLayoutSignature <> gLayoutSignature Then
-        gLastDebugStatus = "LAYOUT_RECONCILED"
-        GanttDrag_RebuildWatchMaps
-        Exit Sub
-    End If
+    If gMetricsEnabled Then phaseStartedAt = GanttDrag_PerformanceNowMs()
+    If Not GanttDrag_TryGetSelectedWatchedShape(ws, shp, shapeName, state) Then
+        If gMetricsEnabled Then gMetricSelectionMs = gMetricSelectionMs + _
+            (GanttDrag_PerformanceNowMs() - phaseStartedAt)
 
-    For Each shapeName In gShapeState.Keys
-        Set shp = Nothing
-        On Error Resume Next
-        Set shp = ws.Shapes(CStr(shapeName))
-        On Error GoTo 0
-
-        If shp Is Nothing Then
+        If gMetricsEnabled Then phaseStartedAt = GanttDrag_PerformanceNowMs()
+        If GanttDrag_LayoutStateChanged(ws) Then
+            If gMetricsEnabled Then gMetricLayoutMs = gMetricLayoutMs + _
+                (GanttDrag_PerformanceNowMs() - phaseStartedAt)
+            gLastDebugStatus = "LAYOUT_RECONCILED"
+            If gMetricsEnabled Then
+                gMetricDeltaTicks = gMetricDeltaTicks + 1
+                gMetricLayoutReconciles = gMetricLayoutReconciles + 1
+            End If
             GanttDrag_RebuildWatchMaps
             Exit Sub
         End If
+        If gMetricsEnabled Then gMetricLayoutMs = gMetricLayoutMs + _
+            (GanttDrag_PerformanceNowMs() - phaseStartedAt)
 
-        state = GanttDrag_GetShapeState(CStr(shapeName))
-        geometryChanged = _
-               Abs(CDbl(state(0)) - shp.Left) > GANTT_DRAG_CHANGE_TOLERANCE _
-            Or Abs(CDbl(state(1)) - shp.Top) > GANTT_DRAG_CHANGE_TOLERANCE _
-            Or Abs(CDbl(state(2)) - shp.Width) > GANTT_DRAG_CHANGE_TOLERANCE _
-            Or Abs(CDbl(state(3)) - shp.Height) > GANTT_DRAG_CHANGE_TOLERANCE
+        If gMetricsEnabled Then gMetricIdleTicks = gMetricIdleTicks + 1
+        Exit Sub
+    End If
+    If gMetricsEnabled Then gMetricSelectionMs = gMetricSelectionMs + _
+        (GanttDrag_PerformanceNowMs() - phaseStartedAt)
 
-        If geometryChanged Then
-            gLastDebugStatus = _
-                CStr(shapeName) & _
-                " Left " & Format$(CDbl(state(0)), "0.00") & " -> " & Format$(shp.Left, "0.00") & _
-                " | Top " & Format$(CDbl(state(1)), "0.00") & " -> " & Format$(shp.Top, "0.00") & _
-                " | Width " & Format$(CDbl(state(2)), "0.00") & " -> " & Format$(shp.Width, "0.00") & _
-                " | Height " & Format$(CDbl(state(3)), "0.00") & " -> " & Format$(shp.Height, "0.00")
+    If gMetricsEnabled Then
+        gMetricTickShapesInspected = gMetricTickShapesInspected + 1
+        gMetricGeometryReads = gMetricGeometryReads + 2
+    End If
 
-            Debug.Print gLastDebugStatus
-            GanttDrag_HandleShapeChange ws, shp, state
-            Exit For
-        End If
-    Next shapeName
+    If gMetricsEnabled Then phaseStartedAt = GanttDrag_PerformanceNowMs()
+    newLeft = CDbl(shp.Left)
+    newRight = newLeft + CDbl(shp.Width)
+    If gMetricsEnabled Then gMetricGeometryMs = gMetricGeometryMs + _
+        (GanttDrag_PerformanceNowMs() - phaseStartedAt)
+    geometryChanged = _
+           Abs(CDbl(state(0)) - newLeft) > GANTT_DRAG_CHANGE_TOLERANCE _
+        Or Abs(CDbl(state(1)) - newRight) > GANTT_DRAG_CHANGE_TOLERANCE
+
+    If Not geometryChanged Then
+        If gMetricsEnabled Then gMetricIdleTicks = gMetricIdleTicks + 1
+        Exit Sub
+    End If
+
+    If gMetricsEnabled Then
+        gMetricDeltaTicks = gMetricDeltaTicks + 1
+        gMetricActionTicks = gMetricActionTicks + 1
+    End If
+
+    gLastDebugStatus = _
+        shapeName & _
+        " Left " & Format$(CDbl(state(0)), "0.00") & " -> " & Format$(newLeft, "0.00") & _
+        " | Right " & Format$(CDbl(state(1)), "0.00") & " -> " & Format$(newRight, "0.00")
+
+    Debug.Print gLastDebugStatus
+    GanttDrag_HandleShapeChange ws, shp, state
 
 End Sub
 
@@ -428,35 +773,116 @@ Private Function GanttDrag_BuildLayoutSignature(ByVal ws As Worksheet) As String
 
     Dim signature As String
     Dim colIndex As Long
-    Dim shapeName As Variant
-    Dim state As Variant
-    Dim rowIndex As Long
 
     If ws Is Nothing Then Exit Function
 
     For colIndex = 1 To GANTT_DRAG_FIRST_TIMELINE_COL - 1
         signature = signature & _
             "|C" & CStr(colIndex) & "=" & _
-            Format$(CDbl(ws.Columns(colIndex).Width), "0.000")
+            Format$(gLayoutState(colIndex - 1), "0.000")
     Next colIndex
 
     signature = signature & _
-        "|TL_LEFT=" & Format$(CDbl(ws.cells(GANTT_DRAG_HEADER_ROW, GANTT_DRAG_FIRST_TIMELINE_COL).Left), "0.000") & _
-        "|TL_WIDTH=" & Format$(CDbl(ws.Columns(GANTT_DRAG_FIRST_TIMELINE_COL).Width), "0.000")
-
-    If Not gShapeState Is Nothing Then
-        For Each shapeName In gShapeState.Keys
-            state = gShapeState(CStr(shapeName))
-            rowIndex = CLng(state(4))
-            If rowIndex >= GANTT_DRAG_FIRST_TASK_ROW Then
-                signature = signature & _
-                    "|R" & CStr(rowIndex) & "=" & _
-                    Format$(CDbl(ws.rows(rowIndex).rowHeight), "0.000")
-            End If
-        Next shapeName
-    End If
+        "|TL_LEFT=" & Format$(gLayoutState(10), "0.000") & _
+        "|TL_WIDTH=" & Format$(gLayoutState(11), "0.000")
 
     GanttDrag_BuildLayoutSignature = signature
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Capture les seules dimensions globales capables de reprojeter les shapes.
+' EN: Captures only global dimensions that can reproject Shapes.
+'------------------------------------------------------------------------------
+Private Sub GanttDrag_CaptureLayoutState(ByVal ws As Worksheet)
+
+    Dim colIndex As Long
+
+    If ws Is Nothing Then Exit Sub
+
+    For colIndex = 1 To GANTT_DRAG_FIRST_TIMELINE_COL - 1
+        gLayoutState(colIndex - 1) = CDbl(ws.Columns(colIndex).Width)
+    Next colIndex
+
+    gLayoutState(10) = CDbl(ws.Cells(GANTT_DRAG_HEADER_ROW, GANTT_DRAG_FIRST_TIMELINE_COL).Left)
+    gLayoutState(11) = CDbl(ws.Columns(GANTT_DRAG_FIRST_TIMELINE_COL).Width)
+    gHasLayoutState = True
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Detecte un changement global de layout avec douze lectures COM constantes.
+' EN: Detects a global layout change with twelve constant COM reads.
+'------------------------------------------------------------------------------
+Private Function GanttDrag_LayoutStateChanged(ByVal ws As Worksheet) As Boolean
+
+    Dim currentValue As Double
+    Dim colIndex As Long
+
+    If ws Is Nothing Then Exit Function
+    If Not gHasLayoutState Then
+        GanttDrag_LayoutStateChanged = True
+        Exit Function
+    End If
+
+    For colIndex = 1 To GANTT_DRAG_FIRST_TIMELINE_COL - 1
+        currentValue = CDbl(ws.Columns(colIndex).Width)
+        If gMetricsEnabled Then gMetricLayoutReads = gMetricLayoutReads + 1
+        If Abs(currentValue - gLayoutState(colIndex - 1)) > 0.001 Then
+            GanttDrag_LayoutStateChanged = True
+            Exit Function
+        End If
+    Next colIndex
+
+    currentValue = CDbl(ws.Cells(GANTT_DRAG_HEADER_ROW, GANTT_DRAG_FIRST_TIMELINE_COL).Left)
+    If gMetricsEnabled Then gMetricLayoutReads = gMetricLayoutReads + 1
+    If Abs(currentValue - gLayoutState(10)) > 0.001 Then
+        GanttDrag_LayoutStateChanged = True
+        Exit Function
+    End If
+
+    currentValue = CDbl(ws.Columns(GANTT_DRAG_FIRST_TIMELINE_COL).Width)
+    If gMetricsEnabled Then gMetricLayoutReads = gMetricLayoutReads + 1
+    GanttDrag_LayoutStateChanged = _
+        (Abs(currentValue - gLayoutState(11)) > 0.001)
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne uniquement la shape Gantt actuellement selectionnee et surveillee.
+' EN: Returns only the currently selected and watched Gantt Shape.
+'------------------------------------------------------------------------------
+Private Function GanttDrag_TryGetSelectedWatchedShape( _
+    ByVal ws As Worksheet, _
+    ByRef shp As Shape, _
+    ByRef shapeName As String, _
+    ByRef state As Variant) As Boolean
+
+    Dim selectionObject As Object
+    Dim selectedRange As ShapeRange
+
+    On Error GoTo SafeExit
+
+    If ws Is Nothing Then Exit Function
+    Set selectionObject = Application.Selection
+    If selectionObject Is Nothing Then Exit Function
+
+    Set selectedRange = selectionObject.ShapeRange
+    If selectedRange Is Nothing Then Exit Function
+    If selectedRange.Count <> 1 Then Exit Function
+
+    Set shp = selectedRange.Item(1)
+    If shp Is Nothing Then Exit Function
+    If Not (shp.Parent Is ws) Then Exit Function
+
+    shapeName = CStr(shp.Name)
+    If gShapeState Is Nothing Then Exit Function
+    If Not gShapeState.Exists(shapeName) Then Exit Function
+
+    state = gShapeState(shapeName)
+    GanttDrag_TryGetSelectedWatchedShape = True
+
+SafeExit:
 
 End Function
 
@@ -482,6 +908,8 @@ Private Sub GanttDrag_HandleShapeChange( _
     Dim displayConsole As Boolean
     Dim dragInfo As Object
     Dim simulationMode As String
+    Dim engineScope As clsPerfScope
+    Dim consoleScope As clsPerfScope
 
     On Error GoTo TransactionError
 
@@ -493,9 +921,13 @@ Private Sub GanttDrag_HandleShapeChange( _
     shouldRunTest = GanttDrag_BuildTestInputs(ws, shp, oldState, writtenCells, dragInfo)
 
     If Not shouldRunTest Then
-        GanttDrag_SaveShapeState shp, CLng(oldState(4)), CStr(oldState(5))
+        GanttDrag_SaveShapeState shp, CLng(oldState(2)), CStr(oldState(3))
         Exit Sub
     End If
+
+    'The released geometry is the user input. Keep it on screen until the
+    'TEST/SCENARIO transaction converges; rollback restores oldState only on failure.
+    Profiler_RecordOperation "GanttDragPreCommitRestoreSkipped", 1, 0#
 
     gTransactionActive = True
     gTransactionCount = gTransactionCount + 1
@@ -508,6 +940,7 @@ Private Sub GanttDrag_HandleShapeChange( _
 
     If Not GanttDrag_IsSupportedSimulationMode(simulationMode) Then
         GanttDrag_ClearWrittenCells writtenCells
+        GanttDrag_RollbackShapeGeometry shp, oldState, "UnsupportedMode"
         If consoleMessages Is Nothing Then Set consoleMessages = New Collection
         GanttDrag_AddUnsupportedModeMessage consoleMessages, dragInfo, simulationMode
         gLastTransactionResult = "NO_ACTIVE_MODE"
@@ -515,7 +948,10 @@ Private Sub GanttDrag_HandleShapeChange( _
         GoTo CleanExit
     End If
 
+    Profiler_RecordOperation "GanttDrag_DatesWritten", writtenCells.Count, 0#
+    Set engineScope = Profiler_BeginScope("GanttDrag_CommonEngineAfterDates", "Gantt Drag")
     testSucceeded = GanttDrag_RunSimulationTransactionByMode(simulationMode, consoleMessages, ganttRebuilt)
+    Set engineScope = Nothing
 
     If testSucceeded Then
         gLastTransactionResult = "SUCCESS"
@@ -528,6 +964,7 @@ Private Sub GanttDrag_HandleShapeChange( _
         If revertSucceeded Then
             gLastTransactionResult = "REVERTED"
         Else
+            GanttDrag_RollbackShapeGeometry shp, oldState, "RevertFailed"
             gLastTransactionResult = "REVERT_FAILED"
         End If
 
@@ -543,7 +980,12 @@ CleanExit:
     gTransactionActive = False
 
     If displayFailure Or displayConsole Then
-        If Not consoleMessages Is Nothing Then CalcBridge_ShowPlanningConsole consoleMessages
+        If Not consoleMessages Is Nothing Then
+            Set consoleScope = Profiler_BeginScope("GanttDrag_FinalConsole", "Gantt Drag")
+            CalcBridge_ShowPlanningConsole consoleMessages
+            Set consoleScope = Nothing
+            GanttDrag_EnsureArmed
+        End If
     End If
     On Error GoTo 0
     Exit Sub
@@ -551,6 +993,7 @@ CleanExit:
 TransactionError:
     gLastTransactionResult = "ERROR"
     If Not writtenCells Is Nothing Then GanttDrag_ClearWrittenCells writtenCells
+    GanttDrag_RollbackShapeGeometry shp, oldState, "TransactionError"
     If consoleMessages Is Nothing Then Set consoleMessages = New Collection
     GanttDrag_SetDragInfoMode dragInfo, simulationMode
     GanttDrag_AddDragFailureMessage consoleMessages, dragInfo
@@ -588,12 +1031,12 @@ Private Function GanttDrag_BuildTestInputs( _
     On Error GoTo SafeExit
 
     oldLeft = CDbl(oldState(0))
-    oldWidth = CDbl(oldState(2))
-    oldRight = oldLeft + oldWidth
+    oldRight = CDbl(oldState(1))
+    oldWidth = oldRight - oldLeft
     newLeft = CDbl(shp.Left)
     newRight = newLeft + CDbl(shp.Width)
-    ganttRow = CLng(oldState(4))
-    taskType = UCase$(Trim$(CStr(oldState(5))))
+    ganttRow = CLng(oldState(2))
+    taskType = UCase$(Trim$(CStr(oldState(3))))
 
     leftChanged = Abs(newLeft - oldLeft) > GANTT_DRAG_CHANGE_TOLERANCE
     rightChanged = Abs(newRight - oldRight) > GANTT_DRAG_CHANGE_TOLERANCE
@@ -1010,17 +1453,17 @@ Private Function GanttDrag_MonthNumberFromLabel(ByVal monthLabel As String) As L
 
     Select Case normalizedLabel
         Case "jan", "janv", "jan.", "janv.": GanttDrag_MonthNumberFromLabel = 1
-        Case "feb", "fÈv", "fev", "fÈvr", "fevr", "fÈv.", "fev.", "fÈvr.", "fevr.": GanttDrag_MonthNumberFromLabel = 2
+        Case "feb", "f√©v", "fev", "f√©vr", "fevr", "f√©v.", "fev.", "f√©vr.", "fevr.": GanttDrag_MonthNumberFromLabel = 2
         Case "mar", "mars": GanttDrag_MonthNumberFromLabel = 3
         Case "apr", "avr", "avr.": GanttDrag_MonthNumberFromLabel = 4
         Case "may", "mai": GanttDrag_MonthNumberFromLabel = 5
         Case "jun", "juin": GanttDrag_MonthNumberFromLabel = 6
         Case "jul", "juil", "juil.": GanttDrag_MonthNumberFromLabel = 7
-        Case "aug", "ao˚t", "aout": GanttDrag_MonthNumberFromLabel = 8
+        Case "aug", "ao√ªt", "aout": GanttDrag_MonthNumberFromLabel = 8
         Case "sep", "sept", "sept.": GanttDrag_MonthNumberFromLabel = 9
         Case "oct", "oct.": GanttDrag_MonthNumberFromLabel = 10
         Case "nov", "nov.": GanttDrag_MonthNumberFromLabel = 11
-        Case "dec", "dÈc", "dec.", "dÈc.": GanttDrag_MonthNumberFromLabel = 12
+        Case "dec", "d√©c", "dec.", "d√©c.": GanttDrag_MonthNumberFromLabel = 12
     End Select
 
 End Function
@@ -1112,6 +1555,8 @@ Private Function GanttDrag_RunSimulationTransactionByMode( _
     ByRef consoleMessages As Collection, _
     ByRef ganttRebuilt As Boolean) As Boolean
 
+    If gMetricsEnabled Then gMetricEngineCalls = gMetricEngineCalls + 1
+
     Select Case UCase$(Trim$(simulationMode))
         Case "TEST"
             GanttDrag_RunSimulationTransactionByMode = GanttLive_RunTestTransaction(consoleMessages, ganttRebuilt)
@@ -1119,7 +1564,34 @@ Private Function GanttDrag_RunSimulationTransactionByMode( _
             GanttDrag_RunSimulationTransactionByMode = GanttLive_RunScenarioTransaction(consoleMessages, ganttRebuilt)
     End Select
 
+    If gMetricsEnabled And ganttRebuilt Then
+        gMetricRendererCalls = gMetricRendererCalls + 1
+    End If
+
 End Function
+
+'------------------------------------------------------------------------------
+' FR: Restaure la geometrie d'origine uniquement en rollback d'echec.
+' EN: Restores original geometry only as a failure rollback.
+'------------------------------------------------------------------------------
+Private Sub GanttDrag_RollbackShapeGeometry( _
+    ByVal shp As Shape, _
+    ByVal oldState As Variant, _
+    Optional ByVal reason As String = "")
+
+    On Error GoTo SafeExit
+
+    If shp Is Nothing Then Exit Sub
+    If IsEmpty(oldState) Then Exit Sub
+
+    shp.Left = CDbl(oldState(0))
+    shp.Width = CDbl(oldState(1)) - CDbl(oldState(0))
+    GanttDrag_SaveShapeState shp, CLng(oldState(2)), CStr(oldState(3))
+    Profiler_RecordOperation "GanttDragFailureRollbackGeometry", 1, 0#
+
+SafeExit:
+
+End Sub
 
 '------------------------------------------------------------------------------
 ' FR: Active ou initialise Set Drag Info Mode dans l'etat runtime du composant.
@@ -1155,10 +1627,10 @@ Private Sub GanttDrag_AddUnsupportedModeMessage( _
     If modeLabel = "" Then modeLabel = "NONE"
 
     CalcBridge_AddConsoleMessage consoleMessages, "WARNING", BiMsg( _
-        "Drag ignorÈ : aucun moteur de simulation actif compatible n'a ÈtÈ trouvÈ." & vbCrLf & _
-        "T‚che : " & taskLabel & vbCrLf & _
+        "Drag ignor√© : aucun moteur de simulation actif compatible n'a √©t√© trouv√©." & vbCrLf & _
+        "T√¢che : " & taskLabel & vbCrLf & _
         "Mode actif : " & modeLabel & vbCrLf & _
-        "Activez TEST ou SCENARIO avant de dÈplacer une t‚che.", _
+        "Activez TEST ou SCENARIO avant de d√©placer une t√¢che.", _
         "Drag ignored: no compatible active simulation engine was found." & vbCrLf & _
         "Task: " & taskLabel & vbCrLf & _
         "Active mode: " & modeLabel & vbCrLf & _
@@ -1220,11 +1692,11 @@ Private Function GanttDrag_BuildDragMessage( _
     End If
 
     If success Then
-        frText = "Modification " & GanttDrag_InfoEngineLabel(dragInfo, "Drag") & " appliquÈe." & vbCrLf & _
-            "T‚che : " & taskLabel & vbCrLf & _
-            "Modification demandÈe : " & changesFr & vbCrLf & _
-            "Le planning a ÈtÈ recalculÈ. Les consÈquences Èventuelles sur les autres t‚ches proviennent du moteur planning." & vbCrLf & vbCrLf & _
-            "Pour abandonner cette simulation et revenir au dernier planning calculÈ, cliquez sur RÈinitialiser."
+        frText = "Modification " & GanttDrag_InfoEngineLabel(dragInfo, "Drag") & " appliqu√©e." & vbCrLf & _
+            "T√¢che : " & taskLabel & vbCrLf & _
+            "Modification demand√©e : " & changesFr & vbCrLf & _
+            "Le planning a √©t√© recalcul√©. Les cons√©quences √©ventuelles sur les autres t√¢ches proviennent du moteur planning." & vbCrLf & vbCrLf & _
+            "Pour abandonner cette simulation et revenir au dernier planning calcul√©, cliquez sur R√©initialiser."
 
         enText = GanttDrag_InfoEngineLabel(dragInfo, "Drag") & " modification applied." & vbCrLf & _
             "Task: " & taskLabel & vbCrLf & _
@@ -1235,19 +1707,19 @@ Private Function GanttDrag_BuildDragMessage( _
         Select Case simulationMode
             Case "TEST"
                 frText = frText & vbCrLf & _
-                    "Pour retirer uniquement une hypothËse, videz la cellule TEST jaune correspondante puis relancez TEST."
+                    "Pour retirer uniquement une hypoth√®se, videz la cellule TEST jaune correspondante puis relancez TEST."
                 enText = enText & vbCrLf & _
                     "To remove only one assumption, clear the corresponding yellow TEST cell and run TEST again."
             Case "SCENARIO"
                 frText = frText & vbCrLf & _
-                    "Pour retirer uniquement une hypothËse, videz la cellule jaune correspondante puis cliquez sur ScÈnario."
+                    "Pour retirer uniquement une hypoth√®se, videz la cellule jaune correspondante puis cliquez sur Sc√©nario."
                 enText = enText & vbCrLf & _
                     "To remove only one assumption, clear the corresponding yellow cell and click Scenario."
         End Select
     Else
-        frText = "La modification demandÈe par Drag n'a pas pu Ítre appliquÈe." & vbCrLf & _
-            "T‚che : " & taskLabel & vbCrLf & _
-            "Modification demandÈe : " & changesFr
+        frText = "La modification demand√©e par Drag n'a pas pu √™tre appliqu√©e." & vbCrLf & _
+            "T√¢che : " & taskLabel & vbCrLf & _
+            "Modification demand√©e : " & changesFr
 
         enText = "The modification requested by Drag could not be applied." & vbCrLf & _
             "Task: " & taskLabel & vbCrLf & _
@@ -1333,7 +1805,7 @@ Private Function GanttDrag_InfoChangesText( _
 
     If dragInfo Is Nothing Then
         If french Then
-            GanttDrag_InfoChangesText = "modification non identifiÈe"
+            GanttDrag_InfoChangesText = "modification non identifi√©e"
         Else
             GanttDrag_InfoChangesText = "unidentified modification"
         End If
@@ -1348,18 +1820,18 @@ Private Function GanttDrag_InfoChangesText( _
     If changedStart And changedFinish Then
         If startText = finishText Then
             If french Then
-                GanttDrag_InfoChangesText = "dÈbut et fin = " & startText
+                GanttDrag_InfoChangesText = "d√©but et fin = " & startText
             Else
                 GanttDrag_InfoChangesText = "start and finish = " & startText
             End If
         ElseIf french Then
-            GanttDrag_InfoChangesText = "dÈbut = " & startText & ", fin = " & finishText
+            GanttDrag_InfoChangesText = "d√©but = " & startText & ", fin = " & finishText
         Else
             GanttDrag_InfoChangesText = "start = " & startText & ", finish = " & finishText
         End If
     ElseIf changedStart Then
         If french Then
-            GanttDrag_InfoChangesText = "dÈbut = " & startText
+            GanttDrag_InfoChangesText = "d√©but = " & startText
         Else
             GanttDrag_InfoChangesText = "start = " & startText
         End If
@@ -1370,7 +1842,7 @@ Private Function GanttDrag_InfoChangesText( _
             GanttDrag_InfoChangesText = "finish = " & finishText
         End If
     ElseIf french Then
-        GanttDrag_InfoChangesText = "aucune date modifiÈe"
+        GanttDrag_InfoChangesText = "aucune date modifi√©e"
     Else
         GanttDrag_InfoChangesText = "no date changed"
     End If
@@ -1418,6 +1890,7 @@ Private Sub GanttDrag_WriteTestCell( _
     SetGanttInternalWrite True
 
     targetCell.value = DateValue(testDate)
+    If gMetricsEnabled Then gMetricExcelWrites = gMetricExcelWrites + 1
     writtenCells.Add targetCell
 
 CleanExit:
@@ -1450,6 +1923,7 @@ Private Sub GanttDrag_ClearWrittenCells(ByVal writtenCells As Collection)
 
     For Each item In writtenCells
         item.ClearContents
+        If gMetricsEnabled Then gMetricExcelWrites = gMetricExcelWrites + 1
     Next item
 
 CleanExit:
@@ -1523,6 +1997,7 @@ Private Function GanttDrag_IsEligibleShape( _
 
     normalizedTaskType = UCase$(Trim$(CStr( _
         tblWBS.DataBodyRange.Cells(dataRow, tblWBS.ListColumns("Task Type").Index).value)))
+    If gMetricsEnabled Then gMetricCellsRead = gMetricCellsRead + 1
 
     If Not isMilestoneShape Then
         If normalizedTaskType <> "TASK" Then Exit Function
@@ -1548,17 +2023,17 @@ Private Sub GanttDrag_SaveShapeState( _
     ByVal rowIndex As Long, _
     ByVal taskType As String)
 
-    Dim state(0 To 5) As Variant
+    Dim state(0 To 3) As Variant
+    Dim shapeLeft As Double
 
     If shp Is Nothing Then Exit Sub
     If gShapeState Is Nothing Then Set gShapeState = CreateObject("Scripting.Dictionary")
 
-    state(0) = CDbl(shp.Left)
-    state(1) = CDbl(shp.Top)
-    state(2) = CDbl(shp.Width)
-    state(3) = CDbl(shp.Height)
-    state(4) = CLng(rowIndex)
-    state(5) = CStr(taskType)
+    shapeLeft = CDbl(shp.Left)
+    state(0) = shapeLeft
+    state(1) = shapeLeft + CDbl(shp.Width)
+    state(2) = CLng(rowIndex)
+    state(3) = CStr(taskType)
 
     gShapeState(CStr(shp.Name)) = state
 
