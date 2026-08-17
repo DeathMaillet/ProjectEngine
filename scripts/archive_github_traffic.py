@@ -27,7 +27,7 @@ if not token:
     raise SystemExit("TRAFFIC_READ_TOKEN is missing.")
 
 owner, name = repo.split("/", 1)
-api_base = f"https://api.github.com/repos/{owner}/{name}/traffic"
+api_base = f"https://api.github.com/repos/{owner}/{name}"
 
 headers = {
     "Accept": "application/vnd.github+json",
@@ -92,6 +92,15 @@ def parse_dates(rows, field="date"):
 
 def ints(rows, field):
     return [as_int(r.get(field, 0)) for r in rows]
+
+
+def cumulative(values):
+    total = 0
+    out = []
+    for value in values:
+        total += as_int(value)
+        out.append(total)
+    return out
 
 
 def break_series_on_gaps(x, values, max_gap_days=2):
@@ -318,10 +327,12 @@ events = load_events(data_dir / "events.csv")
 # 1) Fetch canonical current GitHub traffic
 # ----------------------------------------------------------------------
 
-views = api_get("/views?per=day")
-clones = api_get("/clones?per=day")
-referrers = api_get("/popular/referrers")
-popular_paths = api_get("/popular/paths")
+views = api_get("/traffic/views?per=day")
+clones = api_get("/traffic/clones?per=day")
+referrers = api_get("/traffic/popular/referrers")
+popular_paths = api_get("/traffic/popular/paths")
+repository_info = api_get("")
+releases = api_get("/releases?per_page=100")
 
 view_rows = [
     {"date": item["timestamp"][:10], "views": item["count"], "unique_visitors": item["uniques"]}
@@ -415,6 +426,40 @@ rollups.append({field: str(rollup_row.get(field, "")) for field in rollup_fields
 rollups.sort(key=lambda row: row.get("snapshot_date", ""))
 write_csv(data_dir / "rolling_14d_snapshots.csv", rollup_fields, rollups)
 
+# Snapshot quotidien des indicateurs cumulatifs réellement interprétables.
+# Les étoiles et téléchargements de releases sont des compteurs globaux ;
+# leur historique ne peut commencer qu'à partir du premier snapshot archivé.
+release_downloads = sum(
+    as_int(asset.get("download_count", 0))
+    for release in releases
+    for asset in release.get("assets", [])
+)
+project_snapshot_fields = [
+    "snapshot_date", "snapshot_utc", "stars",
+    "release_downloads", "release_count",
+]
+project_snapshot_row = {
+    "snapshot_date": snapshot_date,
+    "snapshot_utc": snapshot_utc,
+    "stars": repository_info.get("stargazers_count", 0),
+    "release_downloads": release_downloads,
+    "release_count": len(releases),
+}
+project_snapshots = [
+    row for row in load_csv(data_dir / "project_snapshots.csv")
+    if row.get("snapshot_date") != snapshot_date
+]
+project_snapshots.append({
+    field: str(project_snapshot_row.get(field, ""))
+    for field in project_snapshot_fields
+})
+project_snapshots.sort(key=lambda row: row.get("snapshot_date", ""))
+write_csv(
+    data_dir / "project_snapshots.csv",
+    project_snapshot_fields,
+    project_snapshots,
+)
+
 (raw_dir / f"{snapshot_date}.json").write_text(
     json.dumps({
         "snapshot_utc": snapshot_utc,
@@ -423,6 +468,13 @@ write_csv(data_dir / "rolling_14d_snapshots.csv", rollup_fields, rollups)
         "clones": clones,
         "referrers": referrers,
         "popular_paths": popular_paths,
+        "repository": {
+            "stars": repository_info.get("stargazers_count", 0),
+        },
+        "releases": {
+            "count": len(releases),
+            "downloads": release_downloads,
+        },
     }, indent=2, ensure_ascii=False) + "\n",
     encoding="utf-8",
 )
@@ -508,27 +560,69 @@ write_csv(
 # 3) Charts
 # ----------------------------------------------------------------------
 
+# Courbes cumulatives des observations quotidiennes connues.
+# Les périodes sans données restent volontairement discontinues.
+combined_view_values = ints(combined_views, "views")
+combined_clone_values = ints(combined_clones, "clones")
+
 save_line_chart_with_events(
-    charts_dir / "daily_views.png",
-    "ProjectEngine — daily repository traffic (historical + API)",
+    charts_dir / "cumulative_traffic.png",
+    "ProjectEngine — trafic cumulé enregistré",
     parse_dates(combined_views),
     [
-        ("Views", ints(combined_views, "views")),
-        ("Unique visitors", ints(combined_views, "unique_visitors")),
+        ("Vues cumulées", cumulative(combined_view_values)),
     ],
-    "Count",
+    "Cumul enregistré",
+    events,
+)
+
+# Les clones ont leur propre graphique afin de conserver une échelle lisible.
+save_line_chart_with_events(
+    charts_dir / "cumulative_clones.png",
+    "ProjectEngine — clones cumulés enregistrés",
+    parse_dates(combined_clones),
+    [
+        ("Clones cumulés", cumulative(combined_clone_values)),
+    ],
+    "Cumul enregistré",
+    events,
+)
+
+if project_snapshots:
+    project_x = [dt.strptime(r["snapshot_date"], "%Y-%m-%d") for r in project_snapshots]
+    save_line_chart(
+        charts_dir / "cumulative_project_indicators.png",
+        "ProjectEngine — évolution des indicateurs globaux",
+        project_x,
+        [
+            ("Étoiles GitHub", ints(project_snapshots, "stars")),
+            ("Téléchargements des releases", ints(project_snapshots, "release_downloads")),
+        ],
+        "Total",
+        max_gap_days=7,
+    )
+
+save_line_chart_with_events(
+    charts_dir / "daily_views.png",
+    "ProjectEngine — trafic quotidien du dépôt (historique + API)",
+    parse_dates(combined_views),
+    [
+        ("Vues", ints(combined_views, "views")),
+        ("Visiteurs uniques", ints(combined_views, "unique_visitors")),
+    ],
+    "Nombre",
     events,
 )
 
 save_line_chart_with_events(
     charts_dir / "daily_clones.png",
-    "ProjectEngine — daily clones (historical + API)",
+    "ProjectEngine — clones quotidiens (historique + API)",
     parse_dates(combined_clones),
     [
         ("Clones", ints(combined_clones, "clones")),
-        ("Unique cloners", ints(combined_clones, "unique_cloners")),
+        ("Cloneurs uniques", ints(combined_clones, "unique_cloners")),
     ],
-    "Count",
+    "Nombre",
     events,
 )
 
@@ -536,13 +630,13 @@ valid_rollups = [r for r in combined_rollups if r.get("rolling_views", "") != ""
 if valid_rollups:
     save_line_chart(
         charts_dir / "rolling_14d.png",
-        "ProjectEngine — rolling 14-day traffic",
+        "ProjectEngine — trafic glissant sur 14 jours",
         [dt.strptime(r["snapshot_date"], "%Y-%m-%d") for r in valid_rollups],
         [
-            ("Views", ints(valid_rollups, "rolling_views")),
-            ("Unique visitors", ints(valid_rollups, "rolling_unique_visitors")),
+            ("Vues", ints(valid_rollups, "rolling_views")),
+            ("Visiteurs uniques", ints(valid_rollups, "rolling_unique_visitors")),
             ("Clones", ints(valid_rollups, "rolling_clones")),
-            ("Unique cloners", ints(valid_rollups, "rolling_unique_cloners")),
+            ("Cloneurs uniques", ints(valid_rollups, "rolling_unique_cloners")),
         ],
         "Count",
         max_gap_days=7,
@@ -551,19 +645,19 @@ if valid_rollups:
 latest_refs = sorted(referrers, key=lambda x: x["uniques"], reverse=True)
 save_bar_chart(
     charts_dir / "latest_referrers.png",
-    f"Top referrers — snapshot {snapshot_date}",
+    f"Principales sources — snapshot du {snapshot_date}",
     [x["referrer"] for x in latest_refs],
     [x["uniques"] for x in latest_refs],
-    "Unique visitors in GitHub rolling window",
+    "Visiteurs uniques dans la fenêtre glissante GitHub",
 )
 
 latest_paths = sorted(popular_paths, key=lambda x: x["uniques"], reverse=True)
 save_bar_chart(
     charts_dir / "latest_paths.png",
-    f"Most visited repository content — snapshot {snapshot_date}",
+    f"Contenus du dépôt les plus visités — snapshot du {snapshot_date}",
     [x.get("title") or x["path"] for x in latest_paths],
     [x["uniques"] for x in latest_paths],
-    "Unique visitors in GitHub rolling window",
+    "Visiteurs uniques dans la fenêtre glissante GitHub",
 )
 
 # Referrer evolution across all recovered + current snapshots
@@ -584,13 +678,13 @@ if all_snapshot_dates:
     # Missing source on a GitHub top-referrers table is represented as 0 for visualization.
     save_line_chart(
         charts_dir / "referrers_history.png",
-        "Referrer evolution — recovered + API rolling snapshots",
+        "Évolution des sources — snapshots reconstitués + API",
         [dt.strptime(d, "%Y-%m-%d") for d in all_snapshot_dates],
         [
             (s, [sources[s].get(d, 0) for d in all_snapshot_dates])
             for s in ranked_sources
         ],
-        "Unique visitors in GitHub rolling window",
+        "Visiteurs uniques dans la fenêtre glissante GitHub",
     )
 
 # ----------------------------------------------------------------------
@@ -639,7 +733,7 @@ for source in sorted(sources):
                 "delta_views_vs_previous_snapshot": as_int(r.get("views")) - as_int(prev.get("views")),
                 "delta_uniques_vs_previous_snapshot": as_int(r.get("unique_visitors")) - as_int(prev.get("unique_visitors")),
                 "previous_snapshot_date": prev.get("snapshot_date", ""),
-                "note": "Net change in rolling GitHub snapshot; not exact daily referrals.",
+                "note": "Variation nette du snapshot glissant GitHub ; il ne s’agit pas d’une attribution quotidienne exacte.",
             })
         prev = r
 
@@ -675,75 +769,94 @@ latest_unique_cloners = as_int(clones.get("uniques", 0))
 first_daily_date = combined_views[0]["date"] if combined_views else "n/a"
 last_daily_date = combined_views[-1]["date"] if combined_views else "n/a"
 
-readme = f"""# ProjectEngine Traffic Archive
+readme = f"""# Archives de trafic de ProjectEngine
 
-Private long-term GitHub traffic archive for `TMailletFR/ProjectEngine`.
+Tableau de bord privé et archive longue durée du trafic GitHub de `TMailletFR/ProjectEngine`.
 
-_Last updated: {snapshot_utc}_
+_Dernière mise à jour : {snapshot_utc}_
 
-## Current GitHub rolling window
+## Indicateurs globaux
 
-| Metric | Value |
+Ces courbes suivent uniquement les indicateurs dont le cumul ou le total a un sens.
+Les visiteurs uniques et les cloneurs uniques ne sont pas cumulés, car une même personne ou un même automate pourrait être compté plusieurs fois.
+
+Les vues et clones cumulés correspondent aux observations quotidiennes effectivement archivées.
+Les périodes sans données restent visibles sous forme de ruptures et ne sont jamais interprétées comme zéro activité.
+
+![Vues cumulées](charts/cumulative_traffic.png)
+
+![Clones cumulés](charts/cumulative_clones.png)
+
+L'historique des étoiles et des téléchargements commence au premier snapshot enregistré par cette version du collecteur.
+
+![Indicateurs globaux](charts/cumulative_project_indicators.png)
+
+## Fenêtre glissante GitHub actuelle
+
+| Indicateur | Valeur |
 |---|---:|
-| Views | **{latest_views}** |
-| Unique visitors | **{latest_unique}** |
+| Vues | **{latest_views}** |
+| Visiteurs uniques | **{latest_unique}** |
 | Clones | **{latest_clones}** |
-| Unique cloners | **{latest_unique_cloners}** |
+| Cloneurs uniques | **{latest_unique_cloners}** |
+| Étoiles GitHub | **{as_int(repository_info.get("stargazers_count", 0))}** |
+| Téléchargements des releases | **{release_downloads}** |
 
-## Long-term daily traffic
+## Trafic quotidien sur la durée
 
-Recovered historical screenshots are merged with the automatic API archive for the charts below.
-On overlapping dates, API data always has priority.
-Visible gaps mean that no historical observation is available for that period; they are intentionally not interpreted as zero traffic.
+Les données historiques récupérées depuis les anciennes captures sont fusionnées avec l'archive automatique de l'API.
+Lorsqu'une date existe dans les deux sources, la donnée API est toujours prioritaire.
+Les ruptures visibles indiquent qu'aucune observation historique n'est disponible pour la période concernée.
 
-Coverage currently starts on **{first_daily_date}** and runs through **{last_daily_date}** where data is available.
+La couverture commence actuellement le **{first_daily_date}** et s'étend jusqu'au **{last_daily_date}**, selon les données disponibles.
 
-![Daily views](charts/daily_views.png)
+![Vues quotidiennes](charts/daily_views.png)
 
-## Long-term daily clones
+## Clones quotidiens sur la durée
 
-![Daily clones](charts/daily_clones.png)
+![Clones quotidiens](charts/daily_clones.png)
 
-## Rolling 14-day trend
+## Tendance glissante sur 14 jours
 
-This chart now includes recovered historical GitHub snapshots as well as the automatic archive.
-Long gaps between historical snapshots are intentionally left unconnected rather than interpolated.
+Cette courbe combine les anciens snapshots GitHub récupérés et l'archive automatique.
+Les longues périodes sans observation restent volontairement discontinues.
 
-![Rolling 14-day trend](charts/rolling_14d.png)
+![Tendance glissante sur 14 jours](charts/rolling_14d.png)
 
-## Current referrers
+## Sources de trafic actuelles
 
-![Latest referrers](charts/latest_referrers.png)
+![Sources actuelles](charts/latest_referrers.png)
 
-## Referrer evolution
+## Évolution des sources de trafic
 
-This graph combines exact values transcribed from old GitHub Traffic tables with the daily automatic snapshots.
+Cette courbe combine les valeurs exactes retranscrites depuis les anciennes tables GitHub Traffic et les snapshots automatiques quotidiens.
 
-![Referrer history](charts/referrers_history.png)
+![Historique des sources](charts/referrers_history.png)
 
-> Referrer values are GitHub rolling-window snapshots. A change between two points is a net change of the 14-day window, not exact per-day attribution.
+> Les valeurs par source sont des snapshots de la fenêtre glissante GitHub. Une variation entre deux points représente donc une variation nette de cette fenêtre, et non une attribution quotidienne exacte.
 
-## Most visited repository content
+## Contenus du dépôt les plus visités
 
-![Popular paths](charts/latest_paths.png)
+![Contenus populaires](charts/latest_paths.png)
 
-## Communication & product events
+## Événements de communication et produit
 
-The repository also contains [`data/events.csv`](data/events.csv), our communication / release / infrastructure timeline.
+Le dépôt contient également [`data/events.csv`](data/events.csv), notre chronologie des communications, releases et évolutions d'infrastructure.
 
-Events marked `plot=1` are drawn directly on the daily traffic and clone charts so traffic spikes can be compared with releases and communication actions.
+Les événements marqués `plot=1` sont affichés directement sur les courbes quotidiennes et cumulatives afin de comparer les variations de trafic aux actions menées.
 
-## Data layout
+## Organisation des données
 
-- [`data/daily_views.csv`](data/daily_views.csv): canonical automatic API archive
-- [`data/daily_clones.csv`](data/daily_clones.csv): canonical automatic API archive
-- [`data/referrers_history.csv`](data/referrers_history.csv): canonical automatic referrer snapshots
-- [`data/historical/`](data/historical/): manually recovered historical screenshots
-- [`data/derived/`](data/derived/): merged long-term datasets and metadata generated automatically
+- [`data/daily_views.csv`](data/daily_views.csv) : archive automatique canonique des vues
+- [`data/daily_clones.csv`](data/daily_clones.csv) : archive automatique canonique des clones
+- [`data/project_snapshots.csv`](data/project_snapshots.csv) : historique quotidien des étoiles et téléchargements de releases
+- [`data/referrers_history.csv`](data/referrers_history.csv) : snapshots automatiques des sources de trafic
+- [`data/historical/`](data/historical/) : données historiques récupérées manuellement depuis les captures
+- [`data/derived/`](data/derived/) : jeux de données fusionnés et métadonnées générées automatiquement
 
-The historical reconstruction is kept separate from canonical API data so its provenance remains explicit.
+La reconstruction historique reste séparée des données API canoniques afin de conserver explicitement sa provenance.
 """
 
 (archive_dir / "README.md").write_text(readme, encoding="utf-8")
 
-print(f"Archived ProjectEngine traffic and rendered merged historical dashboard at {snapshot_utc}")
+print(f"Trafic ProjectEngine archivé et tableau de bord historique généré à {snapshot_utc}")
