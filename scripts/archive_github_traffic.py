@@ -218,10 +218,84 @@ def combine_snapshot_history(current_rows, historical_rows, key_fields, value_fi
     return out
 
 
+EVENT_FIELDS = [
+    "date", "category", "label", "short_label",
+    "channel", "event_type", "plot", "note", "provenance",
+]
+
+
 def load_events(path: Path) -> list[dict[str, str]]:
     rows = load_csv(path)
     rows.sort(key=lambda r: (r.get("date", ""), r.get("category", ""), r.get("label", "")))
     return rows
+
+
+def build_release_events(releases: list[dict]) -> list[dict[str, str]]:
+    """Convert published GitHub releases into dashboard events."""
+    rows: list[dict[str, str]] = []
+    for release in releases:
+        if release.get("draft"):
+            continue
+
+        published_at = str(release.get("published_at") or release.get("created_at") or "")
+        if len(published_at) < 10:
+            continue
+
+        tag = str(release.get("tag_name") or "").strip()
+        name = str(release.get("name") or "").strip()
+        label = name or tag or "Release GitHub"
+        short_label = tag or label
+        release_kind = "préversion" if release.get("prerelease") else "release"
+
+        rows.append({
+            "date": published_at[:10],
+            "category": "release",
+            "label": label,
+            "short_label": short_label,
+            "channel": "github",
+            "event_type": release_kind,
+            "plot": "1",
+            "note": f"Release GitHub {short_label} importée automatiquement depuis l’API.",
+            "provenance": "github_api_release",
+        })
+
+    rows.sort(key=lambda r: (r["date"], r["short_label"]))
+    return rows
+
+
+def combine_manual_and_release_events(
+    manual_events: list[dict[str, str]],
+    release_events: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Merge manual communication events with API release events without duplicates.
+
+    Automatic GitHub release rows take priority over manually entered release rows
+    sharing the same tag/short label. Other manual events are preserved unchanged.
+    """
+    automatic_release_keys = {
+        (r.get("short_label", "").strip().lower(), r.get("date", ""))
+        for r in release_events
+    }
+    automatic_tags = {
+        r.get("short_label", "").strip().lower()
+        for r in release_events
+        if r.get("short_label", "").strip()
+    }
+
+    merged: list[dict[str, str]] = []
+    for row in manual_events:
+        category = row.get("category", "").strip().lower()
+        short_label = row.get("short_label", "").strip().lower()
+        date = row.get("date", "")
+        if category == "release" and (
+            (short_label, date) in automatic_release_keys or short_label in automatic_tags
+        ):
+            continue
+        merged.append({field: row.get(field, "") for field in EVENT_FIELDS})
+
+    merged.extend({field: row.get(field, "") for field in EVENT_FIELDS} for row in release_events)
+    merged.sort(key=lambda r: (r.get("date", ""), r.get("category", ""), r.get("label", "")))
+    return merged
 
 
 def event_date_map(events: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
@@ -321,7 +395,7 @@ charts_dir = archive_dir / "charts"
 for d in (data_dir, historical_dir, derived_dir, raw_dir, charts_dir):
     d.mkdir(parents=True, exist_ok=True)
 
-events = load_events(data_dir / "events.csv")
+manual_events = load_events(data_dir / "events.csv")
 
 # ----------------------------------------------------------------------
 # 1) Fetch canonical current GitHub traffic
@@ -333,6 +407,14 @@ referrers = api_get("/traffic/popular/referrers")
 popular_paths = api_get("/traffic/popular/paths")
 repository_info = api_get("")
 releases = api_get("/releases?per_page=100")
+
+# GitHub releases are authoritative product events. They are archived separately
+# from manually maintained communication events, then merged for the charts.
+release_events = build_release_events(releases)
+write_csv(data_dir / "release_events.csv", EVENT_FIELDS, release_events)
+
+events = combine_manual_and_release_events(manual_events, release_events)
+write_csv(derived_dir / "combined_events.csv", EVENT_FIELDS, events)
 
 view_rows = [
     {"date": item["timestamp"][:10], "views": item["count"], "unique_visitors": item["uniques"]}
@@ -841,7 +923,9 @@ Cette courbe combine les valeurs exactes retranscrites depuis les anciennes tabl
 
 ## Événements de communication et produit
 
-Le dépôt contient également [`data/events.csv`](data/events.csv), notre chronologie des communications, releases et évolutions d'infrastructure.
+Le fichier [`data/events.csv`](data/events.csv) reste réservé aux événements saisis manuellement : publications Reddit, référencement externe, changements de site ou évolutions d'infrastructure.
+
+Les releases GitHub sont désormais récupérées automatiquement depuis l'API et archivées dans [`data/release_events.csv`](data/release_events.csv). Le fichier [`data/derived/combined_events.csv`](data/derived/combined_events.csv) fusionne les deux sources sans doublonner les anciennes releases éventuellement encore présentes dans le fichier manuel.
 
 Les événements marqués `plot=1` sont affichés directement sur les courbes quotidiennes et cumulatives afin de comparer les variations de trafic aux actions menées.
 
@@ -850,6 +934,9 @@ Les événements marqués `plot=1` sont affichés directement sur les courbes qu
 - [`data/daily_views.csv`](data/daily_views.csv) : archive automatique canonique des vues
 - [`data/daily_clones.csv`](data/daily_clones.csv) : archive automatique canonique des clones
 - [`data/project_snapshots.csv`](data/project_snapshots.csv) : historique quotidien des étoiles et téléchargements de releases
+- [`data/events.csv`](data/events.csv) : événements manuels de communication et d'infrastructure
+- [`data/release_events.csv`](data/release_events.csv) : releases GitHub importées automatiquement
+- [`data/derived/combined_events.csv`](data/derived/combined_events.csv) : chronologie fusionnée utilisée par les graphiques
 - [`data/referrers_history.csv`](data/referrers_history.csv) : snapshots automatiques des sources de trafic
 - [`data/historical/`](data/historical/) : données historiques récupérées manuellement depuis les captures
 - [`data/derived/`](data/derived/) : jeux de données fusionnés et métadonnées générées automatiquement
