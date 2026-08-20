@@ -116,6 +116,7 @@ Public Function GanttLocal_BuildChangeSet( _
     Dim parentRow As Long
     Dim fallbackReason As String
     Dim localEligible As Boolean
+    Dim topologyChanged As Boolean
 
     Set perfScope = Profiler_BeginScope("GanttLocal_BuildChangeSet", "Gantt Local")
     Set changeSet = CreateObject("Scripting.Dictionary")
@@ -158,6 +159,10 @@ Public Function GanttLocal_BuildChangeSet( _
             ElseIf CStr(gCommittedSnapshot(idVal)) <> rowSignature Then
                 changedIds(idVal) = True
                 changedRows(CStr(r)) = True
+                If GanttLocal_IsPredecessorSignatureChange( _
+                    CStr(gCommittedSnapshot(idVal)), rowSignature) Then
+                    topologyChanged = True
+                End If
                 If GanttLocal_IsStructuralSignatureChange( _
                     CStr(gCommittedSnapshot(idVal)), rowSignature) Then
                     fallbackReason = "StructuralRowChanged"
@@ -222,6 +227,7 @@ Public Function GanttLocal_BuildChangeSet( _
     changeSet.Add "ChangedCount", changedIds.Count
     changeSet.Add "LocalEligible", localEligible
     changeSet.Add "FallbackReason", fallbackReason
+    changeSet.Add "TopologyChanged", topologyChanged
     changeSet.Add "SnapshotVersion", gSnapshotVersion + 1
 
     Profiler_RecordOperation "GanttLocalRecordsCompared", rowCount, 0#
@@ -335,7 +341,22 @@ Private Function GanttLocal_IsStructuralSignatureChange( _
         (CStr(oldParts(2)) <> CStr(newParts(2))) Or _
         (CStr(oldParts(7)) <> CStr(newParts(7))) Or _
         (CStr(oldParts(8)) <> CStr(newParts(8))) Or _
-        (CStr(oldParts(9)) <> CStr(newParts(9))) Or _
+        (CStr(oldParts(9)) <> CStr(newParts(9)))
+
+End Function
+
+Private Function GanttLocal_IsPredecessorSignatureChange( _
+    ByVal oldSignature As String, _
+    ByVal newSignature As String) As Boolean
+
+    Dim oldParts As Variant
+    Dim newParts As Variant
+
+    oldParts = Split(oldSignature, Chr$(30))
+    newParts = Split(newSignature, Chr$(30))
+    If UBound(oldParts) < 11 Or UBound(newParts) < 11 Then Exit Function
+
+    GanttLocal_IsPredecessorSignatureChange = _
         (CStr(oldParts(11)) <> CStr(newParts(11)))
 
 End Function

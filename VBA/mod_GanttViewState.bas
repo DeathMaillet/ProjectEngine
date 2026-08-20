@@ -438,6 +438,19 @@ Public Sub Toggle_Gantt_Constraints()
     gShowConstraints = Not gShowConstraints
     Set ws = ThisWorkbook.Worksheets(GANTT_SHEET)
 
+    If Not GanttDependencySvg_IsTaskGeometryCurrent(ws) Then
+        Profiler_RecordOperation "GanttConstraintGeometryInvalidations", 1, 0#
+        If Not CommitGanttUpdate( _
+            GanttEngine_ActiveDataSource(), _
+            GANTT_UPDATE_SCOPE_INCREMENTAL, _
+            GANTT_RENDER_INTENT_OFFSCREEN, _
+            "Toggle_Gantt_ConstraintsGeometryInvalidation") Then
+            Err.Raise 5, "Toggle_Gantt_Constraints", "Gantt geometry reconciliation failed."
+        End If
+        GanttUiControls_RefreshConstraintVisual ws
+        Exit Sub
+    End If
+
     GanttUiControls_RefreshConstraintVisual ws
     If gShowConstraints Then
         If Not GanttConstraint_RefreshCurrentOverlay(ws) Then
@@ -447,6 +460,7 @@ Public Sub Toggle_Gantt_Constraints()
         GanttConstraint_ClearCurrentOverlay ws
     End If
     GanttUiControls_RefreshConstraintVisual ws
+    GanttDependencySvg_EnsureFrontLayer ws
 
 End Sub
 

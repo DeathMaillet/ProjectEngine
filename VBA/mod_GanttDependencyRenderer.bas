@@ -439,7 +439,9 @@ Public Sub GanttDependency_InvalidateLocalIndex(Optional ByVal reason As String 
 
 End Sub
 
-Public Function GanttDependency_PrimeLocalIndex(ByVal wsGantt As Worksheet) As Boolean
+Public Function GanttDependency_PrimeLocalIndex( _
+    ByVal wsGantt As Worksheet, _
+    Optional ByVal refreshFromCalc As Boolean = False) As Boolean
 
     Dim perfScope As clsPerfScope
     Dim succId As Variant
@@ -449,11 +451,16 @@ Public Function GanttDependency_PrimeLocalIndex(ByVal wsGantt As Worksheet) As B
     Dim linkIndex As Long
     Dim i As Long
     Dim shapeName As String
+    Dim oldSpecs As Object
+    Dim changedPrefixes As Object
+    Dim prefix As Variant
 
     Set perfScope = Profiler_BeginScope("GanttDependency_PrimeLocalIndex", "Gantt Local")
     On Error GoTo Failed
 
     If wsGantt Is Nothing Then Exit Function
+    Set oldSpecs = gLinkSpecsByPrefix
+    Set changedPrefixes = CreateObject("Scripting.Dictionary")
     If GanttDependencySvg_HasLayer(wsGantt) And Not GanttDependencySvg_HasRoutes() Then
         If GanttDependencySvg_TryHydratePersistentCache(wsGantt, True) Then
             Profiler_RecordOperation "GanttDependencySvgPrimeHydratedRoutes", 1, 0#
@@ -463,6 +470,7 @@ Public Function GanttDependency_PrimeLocalIndex(ByVal wsGantt As Worksheet) As B
         End If
     End If
 
+    If refreshFromCalc Then Set gExpandedLinks = Nothing
     EnsureExpandedLinksCacheFromCalc
     If Not HasExpandedLinksAvailable() Then Exit Function
 
@@ -482,6 +490,24 @@ Public Function GanttDependency_PrimeLocalIndex(ByVal wsGantt As Worksheet) As B
         Next linkItem
     Next succId
 
+    If Not oldSpecs Is Nothing Then
+        For Each prefix In oldSpecs.Keys
+            If Not gLinkSpecsByPrefix.Exists(CStr(prefix)) Then
+                changedPrefixes(CStr(prefix)) = True
+            ElseIf Not GanttDependency_LinkSpecsEqual( _
+                oldSpecs(CStr(prefix)), gLinkSpecsByPrefix(CStr(prefix))) Then
+                changedPrefixes(CStr(prefix)) = True
+            End If
+        Next prefix
+        For Each prefix In gLinkSpecsByPrefix.Keys
+            If Not oldSpecs.Exists(CStr(prefix)) Then changedPrefixes(CStr(prefix)) = True
+        Next prefix
+    End If
+
+    If refreshFromCalc And GanttDependencySvg_IsRequested() Then
+        GanttDependencySvg_ReconcileRouteIds gLinkSpecsByPrefix, changedPrefixes
+    End If
+
     'One bootstrap scan is allowed after opening. Subsequent local transactions
     'resolve only exact names through the per-link segment index.
     For i = 1 To wsGantt.Shapes.Count
@@ -499,6 +525,19 @@ Public Function GanttDependency_PrimeLocalIndex(ByVal wsGantt As Worksheet) As B
 
 Failed:
     GanttDependency_InvalidateLocalIndex "PrimeError"
+
+End Function
+
+Private Function GanttDependency_LinkSpecsEqual( _
+    ByVal leftSpec As Object, _
+    ByVal rightSpec As Object) As Boolean
+
+    If leftSpec Is Nothing Or rightSpec Is Nothing Then Exit Function
+    GanttDependency_LinkSpecsEqual = _
+        (CStr(leftSpec("PredID")) = CStr(rightSpec("PredID"))) And _
+        (CStr(leftSpec("SuccID")) = CStr(rightSpec("SuccID"))) And _
+        (CStr(leftSpec("LinkType")) = CStr(rightSpec("LinkType"))) And _
+        (Abs(CDbl(leftSpec("Lag")) - CDbl(rightSpec("Lag"))) < 0.000001)
 
 End Function
 
@@ -987,8 +1026,16 @@ Private Sub DrawSingleDependencyLink( _
 
         Case "FF"
             Set stageScope = Profiler_BeginScope("DependencyRoute_AnchorLookup", "Dependency Render")
-            GetCachedTaskAnchorPointByType anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, succDataRow, _
-                succAnchorType, succX, succY, baseById, testById, isTestMode
+            If GanttDependency_IsPointMarkerTarget( _
+                dataArr, mapWBS, succDataRow, baseById, testById, isTestMode) Then
+                GetCachedTaskStartMidEntryPoint _
+                    anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, succDataRow, _
+                    succX, succY, baseById, testById, isTestMode
+                Profiler_RecordOperation "GanttDependencyFfPointMarkerLeftEntry", 1, 0#
+            Else
+                GetCachedTaskAnchorPointByType anchorCache, wsGantt, mapWBS, dataArr, hasChildren, projectStart, totalDays, succDataRow, _
+                    succAnchorType, succX, succY, baseById, testById, isTestMode
+            End If
             Set stageScope = Nothing
 
             gapDays = CLng(CDbl(succDate) - CDbl(predDate) - linkLag)
@@ -1902,6 +1949,34 @@ Private Function GetLinkReferenceDate( _
         Case Else
             GetLinkReferenceDate = GanttLive_GetDisplayFinish(taskId, baseById, testById, isTestMode)
     End Select
+
+End Function
+
+Private Function GanttDependency_IsPointMarkerTarget( _
+    ByRef dataArr As Variant, _
+    ByVal mapWBS As Object, _
+    ByVal dataRow As Long, _
+    ByVal baseById As Object, _
+    ByVal testById As Object, _
+    ByVal isTestMode As Boolean) As Boolean
+
+    Dim taskId As String
+    Dim startValue As Variant
+    Dim finishValue As Variant
+
+    If TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, dataRow) Then
+        GanttDependency_IsPointMarkerTarget = True
+        Exit Function
+    End If
+
+    taskId = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    startValue = GetRenderStartForCurrentScale( _
+        GanttLive_GetDisplayStart(taskId, baseById, testById, isTestMode))
+    finishValue = GetRenderFinishForCurrentScale( _
+        GanttLive_GetDisplayFinish(taskId, baseById, testById, isTestMode))
+
+    If Not HasValue(startValue) Or Not HasValue(finishValue) Then Exit Function
+    GanttDependency_IsPointMarkerTarget = (CDbl(finishValue) - CDbl(startValue) + 1 <= 1)
 
 End Function
 '------------------------------------------------------------------------------

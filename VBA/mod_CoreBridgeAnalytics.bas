@@ -282,8 +282,8 @@ Public Sub CalcBridge_ShowParentDateWarnings( _
             Set consoleMessages = New Collection
 
             CalcBridge_AddGroupedWarningToCollection consoleMessages, warnParentDates, idToWbs, _
-                "Dates saisies sur t‚che parent", _
-                "les valeurs sont ignorÈes, calcul par les t‚ches enfants", _
+                "Dates saisies sur t√¢che parent", _
+                "les valeurs sont ignor√©es, calcul par les t√¢ches enfants", _
                 "Dates entered on summary task", _
                 "values are ignored and calculated from child tasks", _
                 True, _
@@ -292,8 +292,8 @@ Public Sub CalcBridge_ShowParentDateWarnings( _
             CalcBridge_ShowPlanningConsole consoleMessages
         Else
             CalcBridge_AddGroupedWarningToCollection consoleMessages, warnParentDates, idToWbs, _
-                "Dates saisies sur t‚che parent", _
-                "les valeurs sont ignorÈes, calcul par les t‚ches enfants", _
+                "Dates saisies sur t√¢che parent", _
+                "les valeurs sont ignor√©es, calcul par les t√¢ches enfants", _
                 "Dates entered on summary task", _
                 "values are ignored and calculated from child tasks", _
                 True, _
@@ -439,39 +439,39 @@ NextRow:
 
     If warnIgnoredCal.Count > 0 Then
         CalcBridge_AddGroupedWarningToCollection warningMessages, warnIgnoredCal, idToWbs, _
-            "Calendrier ignorÈ sur t‚che Summary / LOE / Milestone", _
-            "le calendrier n'est utilisÈ que pour les t‚ches normales", _
+            "Calendrier ignor√© sur t√¢che Summary / LOE / Milestone", _
+            "le calendrier n'est utilis√© que pour les t√¢ches normales", _
             "Calendar ignored on Summary / LOE / Milestone task", _
             "calendars apply only to normal tasks"
     End If
     If warnLOEProgress.Count > 0 Then
         CalcBridge_AddGroupedWarningToCollection warningMessages, warnLOEProgress, idToWbs, _
-            "% Progress renseignÈ sur LOE", _
-            "le progress LOE est calculÈ automatiquement par date du jour ; la saisie manuelle est ignorÈe dans le Gantt", _
+            "% Progress renseign√© sur LOE", _
+            "le progress LOE est calcul√© automatiquement par date du jour ; la saisie manuelle est ignor√©e dans le Gantt", _
             "% Progress entered on LOE", _
             "LOE progress is automatically calculated from today's date; manual input is ignored in the Gantt"
     End If
 
     If warnLOEBaseline.Count > 0 Then
         CalcBridge_AddGroupedWarningToCollection warningMessages, warnLOEBaseline, idToWbs, _
-            "Baseline renseignÈe sur LOE", _
-            "une LOE doit Ítre pilotÈe par ses liens SS/FF ; vÈrifier que la baseline saisie ne crÈe pas de confusion", _
+            "Baseline renseign√©e sur LOE", _
+            "une LOE doit √™tre pilot√©e par ses liens SS/FF ; v√©rifier que la baseline saisie ne cr√©e pas de confusion", _
             "Baseline entered on LOE", _
             "a LOE must be driven by its SS/FF links; check that entered baseline values are not misleading"
     End If
 
     If warnMilestoneProgress.Count > 0 Then
         CalcBridge_AddGroupedWarningToCollection warningMessages, warnMilestoneProgress, idToWbs, _
-            "% Progress partiel renseignÈ sur Milestone", _
-            "une milestone doit Ítre ‡ 0% ou 100% ; toute valeur intermÈdiaire doit Ítre corrigÈe", _
+            "% Progress partiel renseign√© sur Milestone", _
+            "une milestone doit √™tre √† 0% ou 100% ; toute valeur interm√©diaire doit √™tre corrig√©e", _
             "Partial % Progress entered on Milestone", _
             "a milestone must be either 0% or 100%; any intermediate value should be corrected"
     End If
 
     If warnMilestoneDuration.Count > 0 Then
         CalcBridge_AddGroupedWarningToCollection warningMessages, warnMilestoneDuration, idToWbs, _
-            "DurÈe supÈrieure ‡ 1 jour sur Milestone", _
-            "la t‚che sera rendue comme milestone mais la durÈe saisie peut induire en erreur", _
+            "Dur√©e sup√©rieure √† 1 jour sur Milestone", _
+            "la t√¢che sera rendue comme milestone mais la dur√©e saisie peut induire en erreur", _
             "Duration greater than 1 day on Milestone", _
             "the task will be rendered as a milestone but the entered duration may be misleading"
     End If
@@ -594,6 +594,7 @@ Public Function CalcBridge_BuildAnalyticsSnapshotById( _
     Dim analyticsPredLagBySuccPred As Object
     Dim analyticsPredTypeBySuccPred As Object
     Dim sharedNetworkFinishById As Object
+    Dim semanticViews As Object
     Dim outTotalFloat As Variant
     Dim outFreeFloat As Variant
     Dim outCriticalPath As Variant
@@ -615,10 +616,12 @@ Public Function CalcBridge_BuildAnalyticsSnapshotById( _
     Set parentIds = executionNetwork.ParentIds
     Set validIds = executionNetwork.ValidLeafIds
     Set directChildrenById = executionNetwork.DirectChildrenById
-    Set predsById = executionNetwork.AnalyticsPredsById
-    Set childrenById = executionNetwork.AnalyticsChildrenById
-    Set analyticsPredLagBySuccPred = executionNetwork.PredLagBySuccPred
-    Set analyticsPredTypeBySuccPred = executionNetwork.PredTypeBySuccPred
+    Set semanticViews = CompiledNetwork_BuildSemanticAnalyticsViews( _
+        executionNetwork, dataArr, mapCalc, "Calculated Start", "Calculated Finish")
+    Set predsById = semanticViews("PredsById")
+    Set childrenById = semanticViews("ChildrenById")
+    Set analyticsPredLagBySuccPred = semanticViews("PredLagBySuccPred")
+    Set analyticsPredTypeBySuccPred = semanticViews("PredTypeBySuccPred")
     Set topoOrder = executionNetwork.TopoOrder
     If topoOrder.Count <> validIds.Count Then GoTo SafeExit
     If IsCriticalPathMultiNetworkEnabled() Then
@@ -672,12 +675,15 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
     Dim analyticsPredLagBySuccPred As Object
     Dim analyticsPredTypeBySuccPred As Object
     Dim sharedNetworkFinishById As Object
+    Dim semanticViews As Object
     Dim sharedRexNetworkFinishById As Object
     Dim rexStartById As Object
     Dim rexFinishById As Object
     Dim rexDurationById As Object
     Dim rexDiagnosticsById As Object
     Dim rexDataArr As Variant
+    Dim rexSemanticViews As Object
+    Dim outLongestPathRex As Variant
 
     Set perfScope = Profiler_BeginScope("CalcBridge_RunAnalyticsAndPush", "Analytics")
 
@@ -697,12 +703,14 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
     Set parentIds = executionNetwork.ParentIds
     Set validIds = executionNetwork.ValidLeafIds
     Set directChildrenById = executionNetwork.DirectChildrenById
-    Set predsById = executionNetwork.AnalyticsPredsById
-    Set childrenById = executionNetwork.AnalyticsChildrenById
+    Set semanticViews = CompiledNetwork_BuildSemanticAnalyticsViews( _
+        executionNetwork, dataArr, mapCalc, "Calculated Start", "Calculated Finish")
+    Set predsById = semanticViews("PredsById")
+    Set childrenById = semanticViews("ChildrenById")
     Set idToWbs = executionNetwork.IdToWbs
     Set errMissingBaselineForREX = CreateObject("Scripting.Dictionary")
-    Set analyticsPredLagBySuccPred = executionNetwork.PredLagBySuccPred
-    Set analyticsPredTypeBySuccPred = executionNetwork.PredTypeBySuccPred
+    Set analyticsPredLagBySuccPred = semanticViews("PredLagBySuccPred")
+    Set analyticsPredTypeBySuccPred = semanticViews("PredTypeBySuccPred")
     Set topoOrder = executionNetwork.TopoOrder
 
     If IsCriticalPathMultiNetworkEnabled() Then
@@ -743,6 +751,24 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
             analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, _
             rexStartById, rexFinishById, rexDurationById, rexDiagnosticsById) Then
 
+            Set rexSemanticViews = CompiledNetwork_BuildSemanticAnalyticsViewsFromValues( _
+                executionNetwork, rexStartById, rexFinishById)
+            Set predsById = rexSemanticViews("PredsById")
+            Set childrenById = rexSemanticViews("ChildrenById")
+            Set analyticsPredLagBySuccPred = rexSemanticViews("PredLagBySuccPred")
+            Set analyticsPredTypeBySuccPred = rexSemanticViews("PredTypeBySuccPred")
+            rexStartById.RemoveAll
+            rexFinishById.RemoveAll
+            rexDurationById.RemoveAll
+            rexDiagnosticsById.RemoveAll
+
+            If Not BuildBaselineRexTemporalState( _
+                rexDataArr, mapCalc, rowById, predsById, validIds, topoOrder, _
+                analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, _
+                rexStartById, rexFinishById, rexDurationById, rexDiagnosticsById) Then
+                GoTo RexLongestPathComplete
+            End If
+
             ApplyBaselineRexTemporalStateToArray _
                 rexDataArr, mapCalc, rowById, rexStartById, rexFinishById, rexDurationById
 
@@ -752,9 +778,14 @@ Public Sub CalcBridge_RunAnalyticsAndPush( _
 
             ComputeLongestPath _
                 tblCalc, mapCalc, rowById, predsById, childrenById, validIds, _
-                analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, rexDataArr, , sharedRexNetworkFinishById, _
+                analyticsPredLagBySuccPred, analyticsPredTypeBySuccPred, rexDataArr, outLongestPathRex, sharedRexNetworkFinishById, _
                 "Baseline Start", "Baseline Finish", "Longest Path REX", False
+            If IsArray(outLongestPathRex) Then
+                tblCalc.ListColumns("Longest Path REX").DataBodyRange.value = outLongestPathRex
+                Profiler_RecordOperation "GanttLongestPathRexWritebacks", 1, 0#
+            End If
         End If
+RexLongestPathComplete:
     End If
 
     If errMissingBaselineForREX.Count > 0 Then
@@ -1092,8 +1123,8 @@ End Function
 Public Sub CalcBridge_AddAnalyticsTopologyWarning(ByVal consoleMessages As Collection)
 
     CalcBridge_AddOrShowConsoleMessage consoleMessages, "WARNING", _
-        "Analytics non calculÈes : ordre topologique incomplet." & vbCrLf & _
-        "-> vÈrifier les cycles ou la reconstruction tbl_LOGIC_LINKS.", _
+        "Analytics non calcul√©es : ordre topologique incomplet." & vbCrLf & _
+        "-> v√©rifier les cycles ou la reconstruction tbl_LOGIC_LINKS.", _
         "Analytics not calculated: incomplete topological order." & vbCrLf & _
         "-> check cycles or tbl_LOGIC_LINKS rebuild."
 

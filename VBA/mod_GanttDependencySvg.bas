@@ -15,12 +15,13 @@ Private Const HISTORICAL_MODE As String = "HISTORICAL"
 Private Const SVG_LAYER_NAME As String = "GANTT_DEPENDENCY_SVG"
 Private Const SVG_STAGING_PREFIX As String = "GANTT_DEPENDENCY_SVG_STAGING_"
 Private Const SVG_MARGIN As Double = 5#
+Private Const SVG_PHYSICAL_TOLERANCE As Double = 0.1
 Private Const SVG_LINE_COLOR As String = "#787878"
 Private Const SVG_LINE_WEIGHT As Double = 1#
 Private Const SVG_ARROW_LENGTH As Double = 8#
 Private Const SVG_ARROW_HALF_WIDTH As Double = 3.6
 Private Const SVG_CACHE_SHEET_NAME As String = "__PE_SVG_CACHE"
-Private Const SVG_CACHE_VERSION As String = "SVG_ROUTE_CACHE_V1"
+Private Const SVG_CACHE_VERSION As String = "SVG_ROUTE_CACHE_V2"
 Private Const SVG_CACHE_ALT_PREFIX As String = "ProjectEngineSvgCache|"
 Private Const SVG_CACHE_TAG_SIGNATURE As String = "PE_SVG_CACHE_SIGNATURE"
 
@@ -250,6 +251,35 @@ Public Function GanttDependencySvg_ShouldRebuildRoute(ByVal linkId As String) As
 
 End Function
 
+Public Sub GanttDependencySvg_ReconcileRouteIds( _
+    ByVal expectedRouteIds As Object, _
+    ByVal changedRouteIds As Object)
+
+    Dim routeId As Variant
+    Dim staleIds As Collection
+    Dim staleId As Variant
+
+    EnsureModeInitialized
+    If gRoutesById Is Nothing Then Exit Sub
+    Set staleIds = New Collection
+
+    For Each routeId In gRoutesById.Keys
+        If expectedRouteIds Is Nothing Then
+            staleIds.Add CStr(routeId)
+        ElseIf Not expectedRouteIds.Exists(CStr(routeId)) Then
+            staleIds.Add CStr(routeId)
+        End If
+    Next routeId
+
+    For Each staleId In staleIds
+        gRoutesById.Remove CStr(staleId)
+    Next staleId
+
+    If Not changedRouteIds Is Nothing Then GanttDependencySvg_MarkLinksDirty changedRouteIds
+    Profiler_RecordOperation "GanttDependencySvgRoutesRemoved", staleIds.Count, 0#
+
+End Sub
+
 Public Sub GanttDependencySvg_MarkLinksDirty(ByVal linkIds As Object)
 
     Dim linkId As Variant
@@ -278,11 +308,21 @@ Public Function GanttDependencySvg_CanReuseVisibleDayLayer(ByVal ws As Worksheet
         If gDirtyLinkIds.Count > 0 Then Exit Function
     End If
     If Not GanttDependencySvg_HasRoutes() Then Exit Function
-    If Not GanttDependencySvg_IsTaskGeometryCurrent(ws) Then Exit Function
+    If Not GanttDependencySvg_IsTaskGeometryCurrent(ws) Then
+        gFullModelDirty = True
+        gLastFallbackReason = "TaskGeometryChangedRequiresRouteRebuild"
+        Profiler_RecordOperation "GanttDependencySvgTaskGeometryInvalidations", 1, 0#
+        Exit Function
+    End If
     If Not GanttDependencySvg_AllRoutesHaveTerminalArrow() Then Exit Function
 
     Set shp = GetLayerShape(ws)
     If shp Is Nothing Then Exit Function
+    If Not GanttDependencySvg_IsLayerPhysicalStateCurrent(ws) Then
+        gLastFallbackReason = "SvgLayerPhysicalStateMismatch"
+        Profiler_RecordOperation "GanttDependencySvgPhysicalInvalidations", 1, 0#
+        Exit Function
+    End If
 
     If shp.Visible <> msoTrue Then shp.Visible = msoTrue
     gLayerVisible = True
@@ -301,6 +341,18 @@ Public Function GanttDependencySvg_ArrowheadDimensions() As Variant
     GanttDependencySvg_ArrowheadDimensions = outArr
 
 End Function
+
+Public Sub GanttDependencySvg_EnsureFrontLayer(ByVal ws As Worksheet)
+
+    Dim shp As Shape
+
+    If ws Is Nothing Then Exit Sub
+    Set shp = GetLayerShape(ws)
+    If shp Is Nothing Then Exit Sub
+    If shp.Visible <> msoTrue Then Exit Sub
+    If shp.ZOrderPosition <> ws.Shapes.Count Then shp.ZOrder msoBringToFront
+
+End Sub
 
 Public Sub GanttDependencySvg_SetVisible(ByVal ws As Worksheet, ByVal makeVisible As Boolean)
 
@@ -502,7 +554,9 @@ Public Function GanttDependencySvg_TryCommit(ByVal ws As Worksheet) As Boolean
                     Exit Function
                 End If
             End If
-            If oldLayer.Visible <> msoTrue Then oldLayer.Visible = msoTrue
+            Set stageScope = Profiler_BeginScope("DependencySvg_PositionPicture", "Dependency SVG")
+            ApplyLayerPhysicalState oldLayer, minX, minY, maxX - minX, maxY - minY
+            Set stageScope = Nothing
             gFullModelDirty = False
             Set gDirtyLinkIds = CreateObject("Scripting.Dictionary")
             gLastDirtyLinkCount = 0
@@ -510,9 +564,7 @@ Public Function GanttDependencySvg_TryCommit(ByVal ws As Worksheet) As Boolean
             gActiveMode = SVG_MODE
             gLastTaskGeometrySignature = taskGeometrySignature
             Set gLastTaskGeometryByShape = taskGeometryByShape
-            Set stageScope = Profiler_BeginScope("DependencySvg_PositionPicture", "Dependency SVG")
             ApplyLayerCacheSignature oldLayer, cacheSignature
-            Set stageScope = Nothing
             Set stageScope = Profiler_BeginScope("DependencySvg_PersistCache", "Dependency SVG")
             SavePersistentRouteCache ws, contentHash, cacheSignature
             Set stageScope = Nothing
@@ -541,7 +593,6 @@ Public Function GanttDependencySvg_TryCommit(ByVal ws As Worksheet) As Boolean
     newLayer.LockAspectRatio = msoFalse
     newLayer.Placement = xlFreeFloating
     newLayer.Visible = msoFalse
-    newLayer.ZOrder msoSendToBack
     Set stageScope = Nothing
 
     Set stageScope = Profiler_BeginScope("DependencySvg_DeleteExistingPicture", "Dependency SVG")
@@ -728,6 +779,43 @@ Public Function GanttDependencySvg_IsTaskGeometryCurrent(ByVal ws As Worksheet) 
 
 End Function
 
+Public Function GanttDependencySvg_IsLayerPhysicalStateCurrent(ByVal ws As Worksheet) As Boolean
+
+    Dim layer As Shape
+    Dim expectedLeft As Double
+    Dim expectedTop As Double
+    Dim expectedWidth As Double
+    Dim expectedHeight As Double
+
+    EnsureModeInitialized
+    If ws Is Nothing Then Exit Function
+    If IsAggregatedScaleMode() Then
+        GanttDependencySvg_IsLayerPhysicalStateCurrent = True
+        Exit Function
+    End If
+    If Not GanttDependencySvg_TryGetExpectedLayerBounds( _
+        expectedLeft, expectedTop, expectedWidth, expectedHeight) Then Exit Function
+
+    Set layer = GetLayerShape(ws)
+    If layer Is Nothing Then Exit Function
+    If layer.Visible <> msoTrue Then Exit Function
+    If Abs(CDbl(layer.Left) - expectedLeft) > SVG_PHYSICAL_TOLERANCE Then Exit Function
+    If Abs(CDbl(layer.Top) - expectedTop) > SVG_PHYSICAL_TOLERANCE Then Exit Function
+    If Abs(CDbl(layer.Width) - expectedWidth) > SVG_PHYSICAL_TOLERANCE Then Exit Function
+    If Abs(CDbl(layer.Height) - expectedHeight) > SVG_PHYSICAL_TOLERANCE Then Exit Function
+
+    GanttDependencySvg_IsLayerPhysicalStateCurrent = True
+
+End Function
+
+Public Function GanttDependencySvg_IsPhysicalStateCurrent(ByVal ws As Worksheet) As Boolean
+
+    If Not GanttDependencySvg_IsTaskGeometryCurrent(ws) Then Exit Function
+    GanttDependencySvg_IsPhysicalStateCurrent = _
+        GanttDependencySvg_IsLayerPhysicalStateCurrent(ws)
+
+End Function
+
 Public Function GanttDependencySvg_GetPhysicallyDirtyTaskIds( _
     ByVal ws As Worksheet, _
     ByVal rowById As Object) As Object
@@ -835,7 +923,7 @@ End Function
 
 Public Function GanttDependencySvg_GetPersistentCacheDiagnostics(ByVal ws As Worksheet) As Variant
 
-    Dim result(1 To 1, 1 To 11) As Variant
+    Dim result(1 To 1, 1 To 12) As Variant
     Dim cacheWs As Worksheet
     Dim layer As Shape
     Dim layerSignature As String
@@ -856,6 +944,7 @@ Public Function GanttDependencySvg_GetPersistentCacheDiagnostics(ByVal ws As Wor
     result(1, 9) = gLastFallbackReason
     result(1, 10) = GanttDependencySvg_IsTaskGeometryCurrent(ws)
     result(1, 11) = GanttDependencySvg_AllRoutesHaveTerminalArrow()
+    result(1, 12) = GanttDependencySvg_IsLayerPhysicalStateCurrent(ws)
     GanttDependencySvg_GetPersistentCacheDiagnostics = result
 
 End Function
@@ -1248,6 +1337,74 @@ Private Sub ApplyLayerCacheSignature(ByVal shp As Shape, ByVal cacheSignature As
     On Error GoTo 0
 
 End Sub
+
+Private Sub ApplyLayerPhysicalState( _
+    ByVal shp As Shape, _
+    ByVal layerLeft As Double, _
+    ByVal layerTop As Double, _
+    ByVal layerWidth As Double, _
+    ByVal layerHeight As Double)
+
+    If shp Is Nothing Then Exit Sub
+    If layerWidth < 1# Then layerWidth = 1#
+    If layerHeight < 1# Then layerHeight = 1#
+
+    shp.LockAspectRatio = msoFalse
+    shp.Placement = xlFreeFloating
+    If Abs(CDbl(shp.Left) - layerLeft) > SVG_PHYSICAL_TOLERANCE Then shp.Left = layerLeft
+    If Abs(CDbl(shp.Top) - layerTop) > SVG_PHYSICAL_TOLERANCE Then shp.Top = layerTop
+    If Abs(CDbl(shp.Width) - layerWidth) > SVG_PHYSICAL_TOLERANCE Then shp.Width = layerWidth
+    If Abs(CDbl(shp.Height) - layerHeight) > SVG_PHYSICAL_TOLERANCE Then shp.Height = layerHeight
+    If shp.Visible <> msoTrue Then shp.Visible = msoTrue
+
+End Sub
+
+Private Function GanttDependencySvg_TryGetExpectedLayerBounds( _
+    ByRef layerLeft As Double, _
+    ByRef layerTop As Double, _
+    ByRef layerWidth As Double, _
+    ByRef layerHeight As Double) As Boolean
+
+    Dim routeKey As Variant
+    Dim route As clsGanttDependencyRoute
+    Dim firstBounds As Boolean
+    Dim maxX As Double
+    Dim maxY As Double
+
+    If gRoutesById Is Nothing Then Exit Function
+    If gRoutesById.Count = 0 Then Exit Function
+
+    firstBounds = True
+    For Each routeKey In gRoutesById.Keys
+        Set route = gRoutesById(CStr(routeKey))
+        If route.Visible And route.SegmentCount > 0 Then
+            If firstBounds Then
+                layerLeft = route.MinX
+                layerTop = route.MinY
+                maxX = route.MaxX
+                maxY = route.MaxY
+                firstBounds = False
+            Else
+                If route.MinX < layerLeft Then layerLeft = route.MinX
+                If route.MinY < layerTop Then layerTop = route.MinY
+                If route.MaxX > maxX Then maxX = route.MaxX
+                If route.MaxY > maxY Then maxY = route.MaxY
+            End If
+        End If
+    Next routeKey
+    If firstBounds Then Exit Function
+
+    layerLeft = layerLeft - SVG_MARGIN
+    layerTop = layerTop - SVG_MARGIN
+    maxX = maxX + SVG_MARGIN
+    maxY = maxY + SVG_MARGIN
+    layerWidth = maxX - layerLeft
+    layerHeight = maxY - layerTop
+    If layerWidth < 1# Then layerWidth = 1#
+    If layerHeight < 1# Then layerHeight = 1#
+    GanttDependencySvg_TryGetExpectedLayerBounds = True
+
+End Function
 
 Private Function GetLayerCacheSignature(ByVal shp As Shape) As String
 

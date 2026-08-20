@@ -116,7 +116,7 @@ Public Sub Reset_Planning()
             "Continuer ?", _
             "This will clear the WBS and clean planning calculation outputs." & vbCrLf & _
             "Gantt, S-Curve, Dashboard, history and acknowledgements will not be modified." & vbCrLf & vbCrLf & _
-            "Continue?") ), _
+            "Continue?")), _
         vbQuestion + vbYesNo + vbDefaultButton2, _
         FormatPlanningConsoleMessageForCurrentLanguage(BiMsg("Reset Planning", "Reset Planning")))
 
@@ -176,6 +176,7 @@ Private Sub ResetPlanning_PrepareEmptyWBS( _
 
     If Not tbl.DataBodyRange Is Nothing Then
         tbl.DataBodyRange.ClearContents
+        RestoreWBSFormulaColumns tbl
         ResetPlanning_ApplyWBSInputSetup tbl
     End If
 

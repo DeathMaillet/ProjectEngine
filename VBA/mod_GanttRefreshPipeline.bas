@@ -164,6 +164,7 @@ Public Sub RunGanttRefreshCore( _
     Dim physicalDirtyIds As Object
     Dim incidentDirtyCount As Long
     Dim incidentDirtyMarked As Boolean
+    Dim topologyChanged As Boolean
 
     Set perfScope = Profiler_BeginScope("RunGanttRefreshCore", "Gantt")
     gLastRefreshSucceeded = False
@@ -267,7 +268,7 @@ Public Sub RunGanttRefreshCore( _
         projectStart, projectFinish, totalDays, renderMode)
     timelineSignature = GanttRefresh_BuildTimelineSignature( _
         projectStart, projectFinish, totalDays, rowCount)
-    physicalGeometryCurrent = GanttDependencySvg_IsTaskGeometryCurrent(wsGantt)
+    physicalGeometryCurrent = GanttDependencySvg_IsPhysicalStateCurrent(wsGantt)
 
     If displayOnly And Not forceTimelineLayout Then
         If Len(gLastTimelineSignature) = 0 Then
@@ -327,6 +328,7 @@ Public Sub RunGanttRefreshCore( _
             If wsGantt.Shapes.Count = gLastWorksheetShapeCount Then
                 Set localChangedIds = localChangeSet("ChangedIds")
                 Set localChangedRows = localChangeSet("ChangedRows")
+                topologyChanged = CBool(localChangeSet("TopologyChanged"))
 
                 If localChangedIds.Count = 0 And physicalGeometryCurrent And Not timelineNeedsUpdate Then
                     GanttLocal_CommitChangeSet localChangeSet
@@ -369,6 +371,17 @@ Public Sub RunGanttRefreshCore( _
                 End If
 
                 GanttTimelineProjection_Begin wsGantt, projectStart, totalDays
+
+                If topologyChanged Then
+                    If Not GanttDependency_PrimeLocalIndex(wsGantt, True) Then
+                        localFallbackReason = "DependencyTopologyIndexRefreshFailed"
+                        Profiler_RecordOperation "GanttLocalFallback_" & localFallbackReason, 1, 0#
+                        forceCanonicalRebuild = True
+                        canonicalFallbackReason = localFallbackReason
+                        GoTo LocalDecisionComplete
+                    End If
+                    Profiler_RecordOperation "GanttDependencyTopologyRefreshes", 1, 0#
+                End If
 
                 incidentDirtyMarked = GanttDependency_MarkAffectedLinksDirty(localChangedIds, incidentDirtyCount)
                 If Not incidentDirtyMarked Then
@@ -485,6 +498,7 @@ LocalDecisionComplete:
     If Not displayOnly Or forceCanonicalRebuild Then Gantt_ClearPendingGeometryRepair
 
 RenderComplete:
+    GanttDependencySvg_EnsureFrontLayer wsGantt
     If Not noOpApplied Then
         gLastRenderSignature = renderSignature
         gLastTimelineSignature = timelineSignature
@@ -536,7 +550,7 @@ SafeExit:
             Profiler_RecordOperation "GanttDiffFallback_RenderError", 1, 0#
             Gantt_AddConsoleMessage consoleMessages, "STOP", _
                 "Erreur VBA dans Refresh_Gantt_DisplayOnly" & vbCrLf & _
-                "-> vérifier le dernier bloc modifié dans mod_Gantt" & vbCrLf & _
+                "-> vÃ©rifier le dernier bloc modifiÃ© dans mod_Gantt" & vbCrLf & _
                 "-> " & refreshErrDescription, _
                 "VBA error in Refresh_Gantt_DisplayOnly" & vbCrLf & _
                 "-> check the last edited block in mod_Gantt" & vbCrLf & _
@@ -544,7 +558,7 @@ SafeExit:
         Else
             Gantt_AddConsoleMessage consoleMessages, "STOP", _
                 "Erreur VBA dans Refresh_Gantt" & vbCrLf & _
-                "-> vérifier le dernier bloc modifié dans mod_Gantt" & vbCrLf & _
+                "-> vÃ©rifier le dernier bloc modifiÃ© dans mod_Gantt" & vbCrLf & _
                 "-> " & refreshErrDescription, _
                 "VBA error in Refresh_Gantt" & vbCrLf & _
                 "-> check the last edited block in mod_Gantt" & vbCrLf & _
@@ -673,6 +687,17 @@ Public Sub GanttRefresh_ApplyAnalyticsStyleOnly()
     EnsureGanttViewInitialized
     Set wsGantt = ThisWorkbook.Worksheets(GANTT_SHEET)
     If IsGanttSheetLayoutEmpty(wsGantt) Then GoTo Fallback
+    If Not GanttDependencySvg_IsPhysicalStateCurrent(wsGantt) Then
+        Profiler_RecordOperation "GanttStyleOnlyGeometryInvalidations", 1, 0#
+        If Not CommitGanttUpdate( _
+            GanttEngine_ActiveDataSource(), _
+            GANTT_UPDATE_SCOPE_INCREMENTAL, _
+            GANTT_RENDER_INTENT_OFFSCREEN, _
+            "GanttRefresh_ApplyAnalyticsStyleOnlyGeometryInvalidation") Then
+            Err.Raise 5, "GanttRefresh_ApplyAnalyticsStyleOnly", "Gantt geometry reconciliation failed."
+        End If
+        Exit Sub
+    End If
     If gLastWorksheetShapeCount > 0 Then
         If wsGantt.Shapes.Count <> gLastWorksheetShapeCount Then
             Profiler_RecordOperation "GanttDiffFallback_StyleShapeCountMismatch", 1, 0#

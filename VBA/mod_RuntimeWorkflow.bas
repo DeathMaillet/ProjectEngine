@@ -93,6 +93,9 @@ Public Sub EndPlanningWorkflow()
     gPlanningWorkflowStack.Remove gPlanningWorkflowStack.Count
     If gPlanningWorkflowStack.Count = 0 Then
         gPlanningWorkflowDisplayOwnerId = vbNullString
+        On Error Resume Next
+        GanttDrag_ReconcileWatchState
+        On Error GoTo 0
     End If
     If Not ValidatePlanningWorkflowStack() Then
         ResetPlanningWorkflowContextSafe "EndPlanningWorkflow.InvalidStackAfterPop"

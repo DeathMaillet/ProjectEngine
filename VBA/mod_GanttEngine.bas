@@ -166,7 +166,7 @@ Public Function GanttEngine_IsPhysicalGeometryDirty() As Boolean
 
     On Error GoTo Dirty
     Set ws = ThisWorkbook.Worksheets("GANTT")
-    GanttEngine_IsPhysicalGeometryDirty = Not GanttDependencySvg_IsTaskGeometryCurrent(ws)
+    GanttEngine_IsPhysicalGeometryDirty = Not GanttDependencySvg_IsPhysicalStateCurrent(ws)
     Exit Function
 
 Dirty:

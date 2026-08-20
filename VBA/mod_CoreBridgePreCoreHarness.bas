@@ -438,7 +438,7 @@ Private Sub CoreBridgePreCoreHarness_TestFullOutputWrites( _
             "full WBS push copied " & fieldName
     Next i
 
-    CoreBridgePreCoreHarness_Assert Left$(CStr(tblWBS.ListColumns("Calculated Duration").DataBodyRange.Cells(1, 1).FormulaLocal), 1) = "=", "full WBS push restored calculated duration formula"
+    CoreBridgePreCoreHarness_Assert Left$(CStr(tblWBS.ListColumns("Calculated Duration").DataBodyRange.Cells(1, 1).Formula), 1) = "=", "full WBS push restored calculated duration formula"
 
     Set expectedShared = CreateObject("Scripting.Dictionary")
     For i = LBound(sharedFields) To UBound(sharedFields)

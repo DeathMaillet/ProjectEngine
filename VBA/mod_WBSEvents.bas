@@ -456,29 +456,29 @@ Private Function WBSFormulaColumnHasExpectedFormula(ByVal col As ListColumn) As 
     If col.DataBodyRange Is Nothing Then Exit Function
     If col.DataBodyRange.Cells.CountLarge = 0 Then Exit Function
 
-    expectedFormula = ExpectedWBSFormulaLocal(col.Name)
+    expectedFormula = ExpectedWBSFormulaInvariant(col.Name)
     If Len(expectedFormula) = 0 Then Exit Function
 
-    currentFormula = CStr(col.DataBodyRange.Cells(1, 1).FormulaLocal)
+    currentFormula = CStr(col.DataBodyRange.Cells(1, 1).Formula)
     WBSFormulaColumnHasExpectedFormula = (StrComp(currentFormula, expectedFormula, vbTextCompare) = 0)
 
 SafeExit:
 End Function
 
 '------------------------------------------------------------------------------
-' FR: Retourne la valeur Expected WBS Formula Local sans modifier les donnees d'entree.
-' EN: Returns the Expected WBS Formula Local value without mutating input data.
+' FR: Retourne la formule WBS attendue dans la syntaxe anglaise invariante d'Excel.
+' EN: Returns the expected WBS formula in Excel's invariant English syntax.
 '------------------------------------------------------------------------------
 
-Private Function ExpectedWBSFormulaLocal(ByVal columnName As String) As String
+Private Function ExpectedWBSFormulaInvariant(ByVal columnName As String) As String
 
     Select Case CStr(columnName)
         Case "Baseline Finish"
-            ExpectedWBSFormulaLocal = "=SI(OU([@[Baseline Start]]="""";[@[Baseline Duration]]="""");"""";[@[Baseline Start]]+[@[Baseline Duration]]-1)"
+            ExpectedWBSFormulaInvariant = "=IF(OR([@[Baseline Start]]="""",[@[Baseline Duration]]=""""),"""",[@[Baseline Start]]+[@[Baseline Duration]]-1)"
         Case "Actual Duration"
-            ExpectedWBSFormulaLocal = "=SI(OU([@[Actual Start]]="""";[@[Actual Finish]]="""");"""";[@[Actual Finish]]-[@[Actual Start]]+1)"
+            ExpectedWBSFormulaInvariant = "=IF(OR([@[Actual Start]]="""",[@[Actual Finish]]=""""),"""",[@[Actual Finish]]-[@[Actual Start]]+1)"
         Case "Calculated Duration"
-            ExpectedWBSFormulaLocal = "=SI(OU([@[Calculated Start]]="""";[@[Calculated Finish]]="""");"""";[@[Calculated Finish]]-[@[Calculated Start]]+1)"
+            ExpectedWBSFormulaInvariant = "=IF(OR([@[Calculated Start]]="""",[@[Calculated Finish]]=""""),"""",[@[Calculated Finish]]-[@[Calculated Start]]+1)"
     End Select
 
 End Function

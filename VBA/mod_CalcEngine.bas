@@ -1234,6 +1234,7 @@ Public Sub ComputeCriticalPathREX( _
     Dim outTF() As Variant
     Dim outFF() As Variant
     Dim useMultiNetwork As Boolean
+    Dim semanticViews As Object
 
     Set perfScope = Profiler_BeginScope("ComputeCriticalPathREX", "Analytics REX")
 
@@ -1274,6 +1275,23 @@ Public Sub ComputeCriticalPathREX( _
         predLagBySuccPred, predTypeBySuccPred, _
         rexStartById, rexFinishById, rexDurationById, errMissingBaselineForREX) Then
         Exit Sub
+    End If
+
+    If Not executionNetwork Is Nothing Then
+        Set semanticViews = CompiledNetwork_BuildSemanticAnalyticsViewsFromValues( _
+            executionNetwork, rexStartById, rexFinishById)
+        Set predsById = semanticViews("PredsById")
+        Set childrenById = semanticViews("ChildrenById")
+        Set predLagBySuccPred = semanticViews("PredLagBySuccPred")
+        Set predTypeBySuccPred = semanticViews("PredTypeBySuccPred")
+        rexStartById.RemoveAll
+        rexFinishById.RemoveAll
+        rexDurationById.RemoveAll
+        errMissingBaselineForREX.RemoveAll
+        If Not BuildBaselineRexTemporalState( _
+            dataArr, mapCalc, idToRow, predsById, validIds, topoOrder, _
+            predLagBySuccPred, predTypeBySuccPred, _
+            rexStartById, rexFinishById, rexDurationById, errMissingBaselineForREX) Then Exit Sub
     End If
 
     For Each idKey In rexFinishById.Keys
@@ -2279,25 +2297,25 @@ Public Sub Validate_LogicLinksNetwork()
 
         If errMissingPred.Count > 0 Then
             ShowLogicLinksErrorMessages errMissingPred, taskInfoById, _
-                "Prédécesseur introuvable dans tbl_LOGIC_LINKS", "vérifier la colonne Predecessors WBS", _
+                "PrÃ©dÃ©cesseur introuvable dans tbl_LOGIC_LINKS", "vÃ©rifier la colonne Predecessors WBS", _
                 "Missing predecessor in tbl_LOGIC_LINKS", "check the Predecessors WBS column"
         End If
 
         If errLOEPred.Count > 0 Then
             ShowLogicLinksErrorMessages errLOEPred, taskInfoById, _
-                "Un Level of Effort ne peut pas être prédécesseur", "corriger la logique de liaison", _
+                "Un Level of Effort ne peut pas Ãªtre prÃ©dÃ©cesseur", "corriger la logique de liaison", _
                 "A Level of Effort cannot be used as predecessor", "fix the logical relationship"
         End If
 
         If errCycle.Count > 0 Then
             ShowLogicLinksErrorMessages errCycle, taskInfoById, _
-                "Boucle logique détectée", "corriger les relations de dépendance", _
+                "Boucle logique dÃ©tectÃ©e", "corriger les relations de dÃ©pendance", _
                 "Logical cycle detected", "fix the dependency relationships"
         End If
 
         If errNotPositionable.Count > 0 Then
             ShowLogicLinksErrorMessages errNotPositionable, taskInfoById, _
-                "Tâche ou chaîne non positionnable", "ajouter une date de début ou une logique amont ancrée", _
+                "TÃ¢che ou chaÃ®ne non positionnable", "ajouter une date de dÃ©but ou une logique amont ancrÃ©e", _
                 "Task or chain cannot be positioned", "add a start date or an anchored upstream logic"
         End If
 
@@ -2306,8 +2324,8 @@ Public Sub Validate_LogicLinksNetwork()
 
     CalcEngine_ShowSingleConsoleMessage "INFO", _
         BiMsg( _
-            "Validation réseau OK." & vbCrLf & _
-            "-> aucun prédécesseur manquant, aucun cycle, aucune tâche non positionnable détectée.", _
+            "Validation rÃ©seau OK." & vbCrLf & _
+            "-> aucun prÃ©dÃ©cesseur manquant, aucun cycle, aucune tÃ¢che non positionnable dÃ©tectÃ©e.", _
             "Network validation OK." & vbCrLf & _
             "-> no missing predecessor, no cycle, no non-positionable task detected.")
 
@@ -2494,8 +2512,8 @@ Private Sub ShowCalcUnsupportedLinkTypeMessages( _
         BuildGroupedMessage( _
             idsDict, _
             idToWbs, _
-            "Type de lien non encore supporté par le moteur", _
-            "à ce stade, seuls les liens FS sont calculés", _
+            "Type de lien non encore supportÃ© par le moteur", _
+            "Ã  ce stade, seuls les liens FS sont calculÃ©s", _
             "Link type not yet supported by the engine", _
             "at this stage, only FS links are calculated")
 
@@ -2542,7 +2560,7 @@ Private Sub ShowLogicLinksStructuralMessages_Stage5A( _
 
     If errMissingPred.Count > 0 Then
         ShowCalcErrorMessages errMissingPred, idToWbs, _
-            "Prédécesseur introuvable dans tbl_LOGIC_LINKS", "vérifier la table des liens logiques", _
+            "PrÃ©dÃ©cesseur introuvable dans tbl_LOGIC_LINKS", "vÃ©rifier la table des liens logiques", _
             "Missing predecessor in tbl_LOGIC_LINKS", "check the logical links table"
     End If
 
@@ -2590,7 +2608,7 @@ Public Sub Test_WBS_UnauthorizedWrite()
 
         CalcBridge_AddConsoleMessage consoleMessages, "WARNING", _
             "FR:" & vbCrLf & _
-            "KO test : aucune demande d'abort n'a été détectée." & vbCrLf & vbCrLf & _
+            "KO test : aucune demande d'abort n'a Ã©tÃ© dÃ©tectÃ©e." & vbCrLf & vbCrLf & _
             "EN:" & vbCrLf & _
             "KO test: no abort request was detected."
 
@@ -2961,7 +2979,7 @@ Private Sub ShowUpstreamViolationMessages( _
         "FR:" & vbCrLf & _
         frProblem & vbCrLf & _
         "-> " & frAction & vbCrLf & vbCrLf & _
-        "Tâches : " & itemsLine & vbCrLf & vbCrLf & _
+        "TÃ¢ches : " & itemsLine & vbCrLf & vbCrLf & _
         "EN:" & vbCrLf & _
         enProblem & vbCrLf & _
         "-> " & enAction & vbCrLf & vbCrLf & _

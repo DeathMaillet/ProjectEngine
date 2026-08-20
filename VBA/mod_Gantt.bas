@@ -421,7 +421,8 @@ Private Function Gantt_DependencyDiagnosticsAreReady(ByVal diag As Variant) As B
         CBool(diag(1, 3)) And _
         CBool(diag(1, 4)) And _
         (CLng(diag(1, 5)) > 0) And _
-        CBool(diag(1, 11))
+        CBool(diag(1, 11)) And _
+        CBool(diag(1, 12))
 
 End Function
 

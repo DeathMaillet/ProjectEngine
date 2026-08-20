@@ -27,14 +27,6 @@ Public Sub RestoreWBSFormulaColumns(ByVal tblWBS As ListObject)
     Dim perfScope As clsPerfScope
     Dim consoleMessages As Collection
     Dim authorizedFields As Variant
-    Dim dataArr As Variant
-    Dim hasIdentity() As Boolean
-    Dim rowCount As Long
-    Dim r As Long
-    Dim idColIndex As Long
-    Dim wbsColIndex As Long
-    Dim idVal As String
-    Dim wbsVal As String
     Dim baselineFinishCol As ListColumn
     Dim actualDurationCol As ListColumn
     Dim calculatedDurationCol As ListColumn
@@ -52,46 +44,31 @@ Public Sub RestoreWBSFormulaColumns(ByVal tblWBS As ListObject)
     If tblWBS.DataBodyRange Is Nothing Then Exit Sub
 
     On Error Resume Next
-    idColIndex = tblWBS.ListColumns("ID").Index
-    wbsColIndex = tblWBS.ListColumns("WBS").Index
     Set baselineFinishCol = tblWBS.ListColumns("Baseline Finish")
     Set actualDurationCol = tblWBS.ListColumns("Actual Duration")
     Set calculatedDurationCol = tblWBS.ListColumns("Calculated Duration")
     Err.Clear
     On Error GoTo SafeExit
 
-    dataArr = tblWBS.DataBodyRange.value
-    rowCount = UBound(dataArr, 1)
-    ReDim hasIdentity(1 To rowCount)
-
-    For r = 1 To rowCount
-        idVal = vbNullString
-        wbsVal = vbNullString
-        If idColIndex > 0 Then idVal = Trim$(CStr(dataArr(r, idColIndex)))
-        If wbsColIndex > 0 Then wbsVal = Trim$(CStr(dataArr(r, wbsColIndex)))
-        wbsVal = Replace$(wbsVal, ",", ".")
-        hasIdentity(r) = (idVal <> vbNullString Or wbsVal <> vbNullString)
-    Next r
-
     authorizedFields = Array("Baseline Finish", "Actual Duration", "Calculated Duration")
     writeScopeToken = OpenAuthorizedWBSWriteScope( _
         "RestoreWBSFormulaColumns", authorizedFields)
 
     If Not baselineFinishCol Is Nothing Then
-        RestoreWBSFormulaColumnIfNeeded baselineFinishCol, hasIdentity, _
-            "=SI(OU([@[Baseline Start]]="""";[@[Baseline Duration]]="""");"""";[@[Baseline Start]]+[@[Baseline Duration]]-1)", _
+        RestoreWBSFormulaColumnIfNeeded baselineFinishCol, _
+            "=IF(OR([@[Baseline Start]]="""",[@[Baseline Duration]]=""""),"""",[@[Baseline Start]]+[@[Baseline Duration]]-1)", _
             "dd/mm/yyyy"
     End If
 
     If Not actualDurationCol Is Nothing Then
-        RestoreWBSFormulaColumnIfNeeded actualDurationCol, hasIdentity, _
-            "=SI(OU([@[Actual Start]]="""";[@[Actual Finish]]="""");"""";[@[Actual Finish]]-[@[Actual Start]]+1)", _
+        RestoreWBSFormulaColumnIfNeeded actualDurationCol, _
+            "=IF(OR([@[Actual Start]]="""",[@[Actual Finish]]=""""),"""",[@[Actual Finish]]-[@[Actual Start]]+1)", _
             "0"
     End If
 
     If Not calculatedDurationCol Is Nothing Then
-        RestoreWBSFormulaColumnIfNeeded calculatedDurationCol, hasIdentity, _
-            "=SI(OU([@[Calculated Start]]="""";[@[Calculated Finish]]="""");"""";[@[Calculated Finish]]-[@[Calculated Start]]+1)", _
+        RestoreWBSFormulaColumnIfNeeded calculatedDurationCol, _
+            "=IF(OR([@[Calculated Start]]="""",[@[Calculated Finish]]=""""),"""",[@[Calculated Finish]]-[@[Calculated Start]]+1)", _
             "0"
     End If
 
@@ -118,15 +95,12 @@ End Sub
 '------------------------------------------------------------------------------
 Private Sub RestoreWBSFormulaColumnIfNeeded( _
     ByVal targetColumn As ListColumn, _
-    ByRef hasIdentity() As Boolean, _
     ByVal expectedFormula As String, _
     ByVal expectedNumberFormat As String)
 
     Dim targetRange As Range
     Dim currentFormulas As Variant
-    Dim outputFormulas() As Variant
     Dim currentValue As Variant
-    Dim expectedValue As String
     Dim currentFormat As Variant
     Dim rowCount As Long
     Dim r As Long
@@ -137,18 +111,9 @@ Private Sub RestoreWBSFormulaColumnIfNeeded( _
     If targetRange Is Nothing Then Exit Sub
 
     rowCount = targetRange.Rows.Count
-    currentFormulas = targetRange.FormulaLocal
-    ReDim outputFormulas(1 To rowCount, 1 To 1)
+    currentFormulas = targetRange.Formula
 
     For r = 1 To rowCount
-        If hasIdentity(r) Then
-            expectedValue = expectedFormula
-        Else
-            expectedValue = vbNullString
-        End If
-
-        outputFormulas(r, 1) = expectedValue
-
         If rowCount = 1 And Not IsArray(currentFormulas) Then
             currentValue = currentFormulas
         Else
@@ -157,12 +122,12 @@ Private Sub RestoreWBSFormulaColumnIfNeeded( _
 
         If IsError(currentValue) Or IsNull(currentValue) Then
             needsWrite = True
-        ElseIf StrComp(CStr(currentValue), expectedValue, vbTextCompare) <> 0 Then
+        ElseIf StrComp(CStr(currentValue), expectedFormula, vbTextCompare) <> 0 Then
             needsWrite = True
         End If
     Next r
 
-    If needsWrite Then targetRange.FormulaLocal = outputFormulas
+    If needsWrite Then targetRange.Formula = expectedFormula
 
     currentFormat = targetRange.NumberFormat
     If IsNull(currentFormat) Then

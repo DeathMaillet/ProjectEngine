@@ -288,6 +288,202 @@ End Function
 
 ' FR: Construit en O(n) la date de fin Current de chaque composante compilee.
 ' EN: Builds each compiled component's Current finish in O(n).
+' FR: Projette les aretes de summary vers les feuilles qui portent réellement
+' la borne agrégée: Start minimum pour SS, Finish maximum pour FF. FS conserve
+' son expansion historique complète.
+Public Function CompiledNetwork_BuildSemanticAnalyticsViews( _
+    ByVal network As clsCompiledExecutionNetwork, _
+    ByRef dataArr As Variant, _
+    ByVal mapCol As Object, _
+    ByVal startColumn As String, _
+    ByVal finishColumn As String) As Object
+
+    Dim startById As Object
+    Dim finishById As Object
+    Dim idKey As Variant
+    Dim rowIndex As Long
+    Dim value As Variant
+
+    Set startById = CreateObject("Scripting.Dictionary")
+    Set finishById = CreateObject("Scripting.Dictionary")
+    For Each idKey In network.ValidLeafIds.Keys
+        rowIndex = CLng(network.RowById(CStr(idKey)))
+        value = GetCellValue(dataArr(rowIndex, mapCol(startColumn)))
+        If HasValue(value) Then startById(CStr(idKey)) = value
+        value = GetCellValue(dataArr(rowIndex, mapCol(finishColumn)))
+        If HasValue(value) Then finishById(CStr(idKey)) = value
+    Next idKey
+
+    Set CompiledNetwork_BuildSemanticAnalyticsViews = _
+        CompiledNetwork_BuildSemanticAnalyticsViewsFromValues(network, startById, finishById)
+
+End Function
+
+Public Function CompiledNetwork_BuildSemanticAnalyticsViewsFromValues( _
+    ByVal network As clsCompiledExecutionNetwork, _
+    ByVal startById As Object, _
+    ByVal finishById As Object) As Object
+
+    Dim result As Object
+    Dim predsById As Object
+    Dim childrenById As Object
+    Dim lagByEdge As Object
+    Dim typeByEdge As Object
+    Dim edgeKeys As Object
+    Dim groupMembers As Object
+    Dim groupBestMembers As Object
+    Dim groupBestValue As Object
+    Dim groupTypes As Object
+    Dim groupLags As Object
+    Dim members As Collection
+    Dim bestMembers As Collection
+    Dim validIds As Object
+    Dim nodeIds As Variant
+    Dim offsets As Variant
+    Dim predIds As Variant
+    Dim predTypes As Variant
+    Dim predLags As Variant
+    Dim summarySources As Variant
+    Dim succNode As Long
+    Dim edgeIndex As Long
+    Dim succId As String
+    Dim predId As String
+    Dim linkType As String
+    Dim summarySource As String
+    Dim groupKey As String
+    Dim group As Variant
+    Dim member As Variant
+    Dim candidate As Variant
+    Dim bestValue As Double
+    Dim hasCandidate As Boolean
+    Dim better As Boolean
+
+    Set result = CreateObject("Scripting.Dictionary")
+    Set validIds = network.ValidLeafIds
+    Set predsById = CompiledNetwork_CreateEmptyCollections(validIds)
+    Set childrenById = CompiledNetwork_CreateEmptyCollections(validIds)
+    Set lagByEdge = CreateObject("Scripting.Dictionary")
+    Set typeByEdge = CreateObject("Scripting.Dictionary")
+    Set edgeKeys = CreateObject("Scripting.Dictionary")
+    nodeIds = network.NodeIds
+    offsets = network.CorePredOffsets
+    predIds = network.CorePredIds
+    predTypes = network.CorePredTypes
+    predLags = network.CorePredLags
+    summarySources = network.CorePredSummarySourceIds
+
+    For succNode = 1 To network.NodeCount
+        succId = CStr(nodeIds(succNode))
+        If validIds.Exists(succId) Then
+            Set groupMembers = CreateObject("Scripting.Dictionary")
+            Set groupBestMembers = CreateObject("Scripting.Dictionary")
+            Set groupBestValue = CreateObject("Scripting.Dictionary")
+            Set groupTypes = CreateObject("Scripting.Dictionary")
+            Set groupLags = CreateObject("Scripting.Dictionary")
+
+            For edgeIndex = CLng(offsets(succNode)) To CLng(offsets(succNode + 1)) - 1
+                predId = CStr(predIds(edgeIndex))
+                linkType = UCase$(Trim$(CStr(predTypes(edgeIndex))))
+                summarySource = Trim$(CStr(summarySources(edgeIndex)))
+                If validIds.Exists(predId) Then
+                    If Len(summarySource) > 0 And (linkType = "SS" Or linkType = "FF") Then
+                        groupKey = summarySource & "|" & linkType & "|" & CStr(CDbl(predLags(edgeIndex)))
+                        If Not groupMembers.Exists(groupKey) Then
+                            Set members = New Collection
+                            groupMembers.Add groupKey, members
+                            groupTypes(groupKey) = linkType
+                            groupLags(groupKey) = CDbl(predLags(edgeIndex))
+                        Else
+                            Set members = groupMembers(groupKey)
+                        End If
+                        members.Add predId
+
+                        hasCandidate = False
+                        If linkType = "SS" Then
+                            If startById.Exists(predId) Then candidate = startById(predId): hasCandidate = True
+                        Else
+                            If finishById.Exists(predId) Then candidate = finishById(predId): hasCandidate = True
+                        End If
+                        If hasCandidate Then
+                            better = False
+                            If Not groupBestValue.Exists(groupKey) Then
+                                better = True
+                            Else
+                                bestValue = CDbl(groupBestValue(groupKey))
+                                If linkType = "SS" Then
+                                    better = (CDbl(candidate) < bestValue)
+                                Else
+                                    better = (CDbl(candidate) > bestValue)
+                                End If
+                            End If
+                            If better Then
+                                groupBestValue(groupKey) = CDbl(candidate)
+                                Set bestMembers = New Collection
+                                bestMembers.Add predId
+                                If groupBestMembers.Exists(groupKey) Then
+                                    Set groupBestMembers(groupKey) = bestMembers
+                                Else
+                                    groupBestMembers.Add groupKey, bestMembers
+                                End If
+                            ElseIf Abs(CDbl(candidate) - CDbl(groupBestValue(groupKey))) < 0.000001 Then
+                                Set bestMembers = groupBestMembers(groupKey)
+                                bestMembers.Add predId
+                            End If
+                        End If
+                    Else
+                        CompiledNetwork_AddSemanticEdge predsById, childrenById, lagByEdge, typeByEdge, edgeKeys, _
+                            succId, predId, linkType, CDbl(predLags(edgeIndex))
+                    End If
+                End If
+            Next edgeIndex
+
+            For Each group In groupMembers.Keys
+                If groupBestMembers.Exists(CStr(group)) Then
+                    Set members = groupBestMembers(CStr(group))
+                Else
+                    Set members = groupMembers(CStr(group))
+                End If
+                For Each member In members
+                    CompiledNetwork_AddSemanticEdge predsById, childrenById, lagByEdge, typeByEdge, edgeKeys, _
+                        succId, CStr(member), CStr(groupTypes(CStr(group))), CDbl(groupLags(CStr(group)))
+                Next member
+            Next group
+        End If
+    Next succNode
+
+    result.Add "PredsById", predsById
+    result.Add "ChildrenById", childrenById
+    result.Add "PredLagBySuccPred", lagByEdge
+    result.Add "PredTypeBySuccPred", typeByEdge
+    Set CompiledNetwork_BuildSemanticAnalyticsViewsFromValues = result
+
+End Function
+
+Private Sub CompiledNetwork_AddSemanticEdge( _
+    ByVal predsById As Object, _
+    ByVal childrenById As Object, _
+    ByVal lagByEdge As Object, _
+    ByVal typeByEdge As Object, _
+    ByVal edgeKeys As Object, _
+    ByVal succId As String, _
+    ByVal predId As String, _
+    ByVal linkType As String, _
+    ByVal lagValue As Double)
+
+    Dim edgeKey As String
+    Dim semanticKey As String
+
+    edgeKey = succId & "|" & predId
+    semanticKey = edgeKey & "|" & linkType & "|" & CStr(lagValue)
+    If edgeKeys.Exists(semanticKey) Then Exit Sub
+    edgeKeys(semanticKey) = True
+    predsById(succId).Add predId
+    childrenById(predId).Add succId
+    lagByEdge(edgeKey) = lagValue
+    typeByEdge(edgeKey) = linkType
+
+End Sub
+
 Public Function CompiledNetwork_BuildCurrentFinishById( _
     ByVal executionNetwork As clsCompiledExecutionNetwork, _
     ByRef dataArr As Variant, _
