@@ -279,8 +279,38 @@ def build_release_events(releases: list[dict]) -> list[dict[str, str]]:
 
 
 def merge_events(manual_events: list[dict[str, str]], release_events: list[dict[str, str]]) -> list[dict[str, str]]:
+    """
+    Merge manual events with automatically discovered GitHub releases.
+
+    A manually recorded release is ignored when an automatic release with the
+    same date and tag already exists. Other manual events remain untouched.
+    """
     merged = {}
-    for row in manual_events + release_events:
+
+    automatic_release_tags = defaultdict(set)
+    for row in release_events:
+        normalized = normalize_event(row)
+        tag = (normalized["short_label"] or normalized["label"]).strip().lower()
+        if normalized["date"] and tag:
+            automatic_release_tags[normalized["date"]].add(tag)
+
+    for row in manual_events:
+        normalized = normalize_event(row)
+
+        if normalized["category"].strip().lower() == "release":
+            label_text = f'{normalized["short_label"]} {normalized["label"]}'.strip().lower()
+            same_day_tags = automatic_release_tags.get(normalized["date"], set())
+            if any(tag == normalized["short_label"].strip().lower() or tag in label_text for tag in same_day_tags):
+                continue
+
+        key = normalized["key"] or "|".join([
+            normalized["date"],
+            normalized["category"],
+            normalized["label"],
+        ])
+        merged[key] = normalized
+
+    for row in release_events:
         normalized = normalize_event(row)
         key = normalized["key"] or "|".join([
             normalized["date"],
@@ -288,9 +318,193 @@ def merge_events(manual_events: list[dict[str, str]], release_events: list[dict[
             normalized["label"],
         ])
         merged[key] = normalized
+
     rows = list(merged.values())
     rows.sort(key=lambda r: (r["date"], r["category"], r["label"]))
     return rows
+
+
+def load_distinct_referrer_windows(raw_dir: Path) -> list[dict]:
+    """
+    Load raw GitHub snapshots and keep only the latest observation for each
+    real API window end date.
+
+    Several archive runs can expose the same underlying GitHub window. Using
+    the last date present in views.views prevents those duplicate runs from
+    being interpreted as new daily source observations.
+    """
+    by_window_end: dict[str, dict] = {}
+
+    for path in sorted(raw_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        daily_views = payload.get("views", {}).get("views", [])
+        available_dates = [
+            str(item.get("timestamp", ""))[:10]
+            for item in daily_views
+            if item.get("timestamp")
+        ]
+        if not available_dates:
+            continue
+
+        window_end_date = max(available_dates)
+        snapshot_utc = str(payload.get("snapshot_utc", ""))
+        candidate = {
+            "window_end_date": window_end_date,
+            "snapshot_utc": snapshot_utc,
+            "total_views": as_int(payload.get("views", {}).get("count", 0)),
+            "referrers": payload.get("referrers", []) or [],
+        }
+
+        previous = by_window_end.get(window_end_date)
+        if previous is None or snapshot_utc >= previous.get("snapshot_utc", ""):
+            by_window_end[window_end_date] = candidate
+
+    return [by_window_end[key] for key in sorted(by_window_end)]
+
+
+def build_referrer_window_analytics(raw_dir: Path):
+    """
+    Build conservative source analytics from distinct rolling windows.
+
+    Source absence is treated as missing, never as zero. Net changes are only
+    computed when a source is present in two consecutive distinct windows.
+    Positive net changes are accumulated as a lower bound, not as exact
+    attributed traffic.
+    """
+    windows = load_distinct_referrer_windows(raw_dir)
+
+    snapshot_rows = []
+    coverage_rows = []
+    source_maps = []
+
+    for window in windows:
+        source_map = {}
+        visible_views = 0
+
+        for item in window["referrers"]:
+            source = str(item.get("referrer", "")).strip()
+            if not source:
+                continue
+
+            source_views = as_int(item.get("count", 0))
+            source_uniques = as_int(item.get("uniques", 0))
+            source_map[source] = {
+                "views": source_views,
+                "unique_visitors": source_uniques,
+            }
+            visible_views += source_views
+
+            snapshot_rows.append({
+                "window_end_date": window["window_end_date"],
+                "snapshot_utc": window["snapshot_utc"],
+                "referrer": source,
+                "views": source_views,
+                "unique_visitors": source_uniques,
+            })
+
+        total_views = as_int(window["total_views"])
+        unattributed_views = max(total_views - visible_views, 0)
+        coverage_rows.append({
+            "window_end_date": window["window_end_date"],
+            "snapshot_utc": window["snapshot_utc"],
+            "total_views": total_views,
+            "visible_referrer_views": visible_views,
+            "unattributed_or_direct_views": unattributed_views,
+            "visible_coverage_percent": (
+                f"{(100.0 * visible_views / total_views):.2f}"
+                if total_views > 0 else ""
+            ),
+        })
+        source_maps.append(source_map)
+
+    net_rows = []
+    minimum_gain_rows = []
+    cumulative_minimum = defaultdict(int)
+
+    for index in range(1, len(windows)):
+        previous_window = windows[index - 1]
+        current_window = windows[index]
+        previous_map = source_maps[index - 1]
+        current_map = source_maps[index]
+
+        previous_date = dt.strptime(previous_window["window_end_date"], "%Y-%m-%d")
+        current_date = dt.strptime(current_window["window_end_date"], "%Y-%m-%d")
+        days_elapsed = (current_date - previous_date).days
+
+        for source in sorted(set(previous_map) & set(current_map)):
+            previous_values = previous_map[source]
+            current_values = current_map[source]
+
+            delta_views = current_values["views"] - previous_values["views"]
+            delta_uniques = (
+                current_values["unique_visitors"]
+                - previous_values["unique_visitors"]
+            )
+            positive_gain = max(delta_views, 0)
+            cumulative_minimum[source] += positive_gain
+
+            net_rows.append({
+                "window_end_date": current_window["window_end_date"],
+                "previous_window_end_date": previous_window["window_end_date"],
+                "days_elapsed": days_elapsed,
+                "referrer": source,
+                "previous_views": previous_values["views"],
+                "current_views": current_values["views"],
+                "net_change_views": delta_views,
+                "previous_unique_visitors": previous_values["unique_visitors"],
+                "current_unique_visitors": current_values["unique_visitors"],
+                "net_change_unique_visitors": delta_uniques,
+                "comparison_status": "comparable_source_present_in_both_windows",
+            })
+
+            minimum_gain_rows.append({
+                "window_end_date": current_window["window_end_date"],
+                "previous_window_end_date": previous_window["window_end_date"],
+                "days_elapsed": days_elapsed,
+                "referrer": source,
+                "positive_net_gain_views": positive_gain,
+                "minimum_cumulative_detected_views": cumulative_minimum[source],
+                "note": (
+                    "Lower bound from positive rolling-window changes only; "
+                    "not exact daily attribution."
+                ),
+            })
+
+    return windows, snapshot_rows, net_rows, minimum_gain_rows, coverage_rows
+
+
+def save_sparse_line_chart(
+    path: Path,
+    title: str,
+    x,
+    series: list[tuple[str, list[float]]],
+    ylabel: str,
+    show_zero_line: bool = False,
+):
+    if not x or not series:
+        return
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for label, values in series:
+        ax.plot(x, values, marker="o", linewidth=2, label=label)
+
+    if show_zero_line:
+        ax.axhline(0, linewidth=1, alpha=0.45)
+
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
 
 
 def save_line_chart_with_events(
@@ -613,6 +827,55 @@ write_csv(
 )
 
 # ----------------------------------------------------------------------
+# 2b) Conservative referrer analytics from distinct rolling windows
+# ----------------------------------------------------------------------
+
+(
+    referrer_windows,
+    referrer_window_rows,
+    referrer_net_change_rows,
+    referrer_minimum_gain_rows,
+    referrer_coverage_rows,
+) = build_referrer_window_analytics(raw_dir)
+
+write_csv(
+    derived_dir / "referrer_window_snapshots.csv",
+    ["window_end_date", "snapshot_utc", "referrer", "views", "unique_visitors"],
+    referrer_window_rows,
+)
+
+write_csv(
+    derived_dir / "referrer_net_changes.csv",
+    [
+        "window_end_date", "previous_window_end_date", "days_elapsed",
+        "referrer", "previous_views", "current_views", "net_change_views",
+        "previous_unique_visitors", "current_unique_visitors",
+        "net_change_unique_visitors", "comparison_status",
+    ],
+    referrer_net_change_rows,
+)
+
+write_csv(
+    derived_dir / "referrer_minimum_detected_gains.csv",
+    [
+        "window_end_date", "previous_window_end_date", "days_elapsed",
+        "referrer", "positive_net_gain_views",
+        "minimum_cumulative_detected_views", "note",
+    ],
+    referrer_minimum_gain_rows,
+)
+
+write_csv(
+    derived_dir / "referrer_visible_coverage.csv",
+    [
+        "window_end_date", "snapshot_utc", "total_views",
+        "visible_referrer_views", "unattributed_or_direct_views",
+        "visible_coverage_percent",
+    ],
+    referrer_coverage_rows,
+)
+
+# ----------------------------------------------------------------------
 # 3) Charts
 # ----------------------------------------------------------------------
 
@@ -732,6 +995,107 @@ if all_snapshot_dates:
             for s in ranked_sources
         ],
         "Visiteurs uniques dans la fenêtre glissante GitHub",
+    )
+
+# Conservative source analytics: missing source means missing data, not zero.
+if referrer_windows and referrer_net_change_rows:
+    window_dates = [
+        dt.strptime(window["window_end_date"], "%Y-%m-%d")
+        for window in referrer_windows[1:]
+    ]
+
+    net_by_source = defaultdict(dict)
+    net_activity = defaultdict(int)
+    for row in referrer_net_change_rows:
+        source = row["referrer"]
+        date = row["window_end_date"]
+        value = as_int(row["net_change_views"])
+        net_by_source[source][date] = value
+        net_activity[source] += abs(value)
+
+    ranked_net_sources = sorted(
+        net_activity,
+        key=lambda source: net_activity[source],
+        reverse=True,
+    )[:8]
+
+    save_sparse_line_chart(
+        charts_dir / "referrer_net_changes.png",
+        "Variation nette entre fenêtres glissantes successives par source",
+        window_dates,
+        [
+            (
+                source,
+                [
+                    float(net_by_source[source].get(window["window_end_date"], float("nan")))
+                    for window in referrer_windows[1:]
+                ],
+            )
+            for source in ranked_net_sources
+        ],
+        "Variation nette des vues",
+        show_zero_line=True,
+    )
+
+if referrer_windows and referrer_minimum_gain_rows:
+    gain_by_source = defaultdict(dict)
+    final_minimum = defaultdict(int)
+
+    for row in referrer_minimum_gain_rows:
+        source = row["referrer"]
+        date = row["window_end_date"]
+        value = as_int(row["minimum_cumulative_detected_views"])
+        gain_by_source[source][date] = value
+        final_minimum[source] = max(final_minimum[source], value)
+
+    ranked_gain_sources = sorted(
+        final_minimum,
+        key=lambda source: final_minimum[source],
+        reverse=True,
+    )[:8]
+
+    save_sparse_line_chart(
+        charts_dir / "referrer_minimum_detected_gains.png",
+        "Minimum cumulé de nouvelles vues détectées par source",
+        [
+            dt.strptime(window["window_end_date"], "%Y-%m-%d")
+            for window in referrer_windows[1:]
+        ],
+        [
+            (
+                source,
+                [
+                    float(gain_by_source[source].get(window["window_end_date"], float("nan")))
+                    for window in referrer_windows[1:]
+                ],
+            )
+            for source in ranked_gain_sources
+        ],
+        "Borne basse cumulée des vues",
+    )
+
+if referrer_coverage_rows:
+    coverage_dates = [
+        dt.strptime(row["window_end_date"], "%Y-%m-%d")
+        for row in referrer_coverage_rows
+    ]
+    save_line_chart(
+        charts_dir / "referrer_visible_coverage.png",
+        "Couverture des sources visibles dans le trafic GitHub",
+        coverage_dates,
+        [
+            ("Vues totales", ints(referrer_coverage_rows, "total_views")),
+            (
+                "Vues attribuées aux sources visibles",
+                ints(referrer_coverage_rows, "visible_referrer_views"),
+            ),
+            (
+                "Trafic direct, non transmis ou hors tableau",
+                ints(referrer_coverage_rows, "unattributed_or_direct_views"),
+            ),
+        ],
+        "Vues dans la fenêtre glissante",
+        max_gap_days=3,
     )
 
 # ----------------------------------------------------------------------
@@ -879,6 +1243,29 @@ Ce graphique combine les valeurs exactes relevées dans les anciens tableaux Git
 
 > Les valeurs par source sont des instantanés de la fenêtre glissante GitHub sur 14 jours. Leur évolution n’est pas une attribution quotidienne exacte.
 
+## Analyse prudente des sources
+
+Les instantanés GitHub par source utilisent une fenêtre glissante et plusieurs exécutions peuvent exposer exactement la même fenêtre.
+Les calculs ci-dessous utilisent donc la **date réelle de fin de fenêtre API**, dédupliquent les observations identiques et ne transforment jamais une source absente en zéro.
+
+### Variation nette entre fenêtres successives
+
+![Variations nettes par source](charts/referrer_net_changes.png)
+
+> Une variation correspond à la différence entre deux fenêtres glissantes successives. Elle combine les nouvelles entrées et les anciennes vues qui quittent la fenêtre ; ce n’est pas une attribution quotidienne exacte.
+
+### Minimum cumulé de nouvelles vues détectées
+
+![Minimum cumulé détecté](charts/referrer_minimum_detected_gains.png)
+
+> Cette courbe additionne uniquement les variations positives observables lorsque la source est présente dans deux fenêtres successives. Elle constitue une borne basse et non le trafic réel total attribué à chaque source.
+
+### Couverture des sources visibles
+
+![Couverture des sources visibles](charts/referrer_visible_coverage.png)
+
+> GitHub ne fournit qu’un tableau partiel des referrers. La différence avec le trafic total regroupe notamment le trafic direct, les sources non transmises et les sources absentes du tableau.
+
 ## Contenus les plus consultés
 
 ![Contenus populaires](charts/latest_paths.png)
@@ -896,6 +1283,10 @@ Les événements dont `plot=1` sont représentés sur les graphiques quotidiens 
 - [`data/daily_views.csv`](data/daily_views.csv) : archive automatique canonique des vues
 - [`data/daily_clones.csv`](data/daily_clones.csv) : archive automatique canonique des clones
 - [`data/referrers_history.csv`](data/referrers_history.csv) : instantanés automatiques des sources
+- [`data/derived/referrer_window_snapshots.csv`](data/derived/referrer_window_snapshots.csv) : fenêtres API distinctes dédupliquées
+- [`data/derived/referrer_net_changes.csv`](data/derived/referrer_net_changes.csv) : variations nettes comparables entre fenêtres
+- [`data/derived/referrer_minimum_detected_gains.csv`](data/derived/referrer_minimum_detected_gains.csv) : borne basse cumulée des gains visibles
+- [`data/derived/referrer_visible_coverage.csv`](data/derived/referrer_visible_coverage.csv) : part visible et non attribuée du trafic
 - [`data/release_events.csv`](data/release_events.csv) : releases GitHub récupérées automatiquement
 - [`data/project_indicators.csv`](data/project_indicators.csv) : historique des étoiles et téléchargements
 - [`data/historical/`](data/historical/) : données historiques récupérées manuellement
