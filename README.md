@@ -41,3 +41,18 @@ The site is a plain static site. No build process, package manager or dependency
 ## v3 correction
 
 The stylesheet URL now carries a version query (`styles.css?v=3`) so GitHub Pages and browsers do not keep serving the older cached CSS. Explicit hero colours and stronger desktop/landscape layout rules were also added.
+
+## Privacy-friendly audience measurement
+
+The site uses Plausible Analytics for aggregate audience measurement.
+
+- no cookies;
+- no local storage or persistent visitor identifier;
+- no cross-site tracking;
+- no advertising or profiling;
+- no consent banner;
+- a dedicated `privacy.html` page explains the measurement.
+
+The Plausible snippet is installed on `index.html`, `download.html`, `404.html` and `privacy.html`.
+The download page itself acts as the aggregate download-intent step before redirecting to the latest GitHub release asset.
+
