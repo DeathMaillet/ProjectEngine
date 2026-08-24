@@ -4,18 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Privacy and audience measurement — ProjectEngine</title>
-  <meta name="description" content="How ProjectEngine measures aggregate website audience while respecting visitor privacy.">
+  <meta name="description" content="How ProjectEngine uses privacy-first, cookie-free aggregate audience measurement.">
   <meta name="robots" content="index,follow">
   <meta name="theme-color" content="#07152a">
   <link rel="canonical" href="https://tmailletfr.github.io/ProjectEngine/privacy.html">
   <link rel="icon" href="assets/favicon.png?v=2" type="image/png">
   <link rel="stylesheet" href="assets/styles.css?v=4">
-  <!-- Privacy-friendly analytics by Plausible -->
-  <script async src="https://plausible.io/js/pa-JzhKncsgTkOCL9P8KTES-.js"></script>
-  <script>
-    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
-    plausible.init()
-  </script>
+  <!-- Cloudflare Web Analytics -->
+  <script type="module"
+          src="https://static.cloudflareinsights.com/beacon.min.js"
+          data-cf-beacon='{"token":"202ecf5af10b4638a640319fb2933e1e"}'></script>
+  <!-- End Cloudflare Web Analytics -->
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -40,16 +39,17 @@
       <h1 class="privacy-title">Aggregate statistics, not personal tracking.</h1>
 
       <p class="section-lead left">
-        ProjectEngine uses Plausible Analytics solely to understand how the public website is discovered and which pages or links are useful.
+        ProjectEngine uses Cloudflare Web Analytics only to understand aggregate website traffic and page performance.
       </p>
 
       <section class="privacy-card">
         <h2>What is measured</h2>
         <ul>
-          <li>Page views and aggregate daily visitor counts</li>
-          <li>Referring websites and campaign parameters such as UTM tags</li>
-          <li>Browser, operating system, device category and approximate country</li>
-          <li>Outbound link clicks, including links to GitHub and the download page</li>
+          <li>Aggregate page views and visits</li>
+          <li>Referring websites and visited pages</li>
+          <li>General browser, operating system and device categories</li>
+          <li>Approximate country-level traffic</li>
+          <li>Page-load and Core Web Vitals performance metrics</li>
           <li>404 pages, so broken links can be repaired</li>
         </ul>
       </section>
@@ -59,37 +59,40 @@
         <ul>
           <li>No cookies</li>
           <li>No local storage or persistent browser identifier</li>
+          <li>No fingerprinting</li>
           <li>No cross-site or cross-device tracking</li>
           <li>No advertising profile or behavioural targeting</li>
-          <li>No sale or commercial reuse of visitor data</li>
-          <li>No names, email addresses, GitHub identities or free-text content</li>
+          <li>No names, email addresses or GitHub identities</li>
         </ul>
       </section>
 
       <section class="privacy-card">
-        <h2>How Plausible counts visits</h2>
+        <h2>How the measurement works</h2>
         <p>
-          Plausible processes limited connection information to calculate aggregate statistics. It does not store raw IP addresses or persistent identifiers. Its daily visitor calculation uses a rotating identifier that cannot be used to follow a visitor across days, devices or websites.
+          Cloudflare Web Analytics uses a lightweight JavaScript beacon to collect aggregate page-view and performance information.
+          Cloudflare states that Web Analytics does not collect or use visitors' personal data and does not track individual visitors across websites.
         </p>
         <p>
-          The analytics service is provided by Plausible Insights OÜ and its hosted infrastructure processes and stores analytics data in the European Union.
+          The beacon does not use cookies, <code>localStorage</code> or another persistent client-side identifier.
         </p>
       </section>
 
       <section class="privacy-card">
-        <h2>Purpose and access</h2>
+        <h2>Purpose</h2>
         <p>
-          The statistics are used only to improve the ProjectEngine website, understand which communication channels are useful, detect broken navigation and evaluate aggregate interest in the open-source project.
+          These statistics are used only to improve the ProjectEngine website, understand which pages are useful, detect broken navigation and assess aggregate interest in the open-source project.
         </p>
         <p>
-          They are not merged with advertising databases or used to identify individual visitors.
+          The information is not used for advertising, profiling or individual identification.
         </p>
       </section>
 
       <section class="privacy-card">
         <h2>Blocking audience measurement</h2>
         <p>
-          The site does not display a consent banner because it does not use analytics cookies or persistent tracking. Visitors who nevertheless prefer not to contribute to aggregate statistics can block requests to <code>plausible.io</code> using their browser or content blocker.
+          The site does not display a consent banner because it does not use analytics cookies or persistent visitor identifiers.
+          Visitors who nevertheless prefer not to contribute to aggregate statistics can block requests to
+          <code>static.cloudflareinsights.com</code> and <code>cloudflareinsights.com</code> using their browser or content blocker.
         </p>
       </section>
 
@@ -103,7 +106,7 @@
 
       <div class="privacy-actions">
         <a class="button" href="/ProjectEngine/">Return to ProjectEngine</a>
-        <a class="button button-secondary" href="https://plausible.io/data-policy">Plausible data policy</a>
+        <a class="button button-secondary" href="https://www.cloudflare.com/privacypolicy/">Cloudflare privacy policy</a>
       </div>
     </div>
   </main>

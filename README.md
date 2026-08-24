@@ -44,15 +44,14 @@ The stylesheet URL now carries a version query (`styles.css?v=3`) so GitHub Page
 
 ## Privacy-friendly audience measurement
 
-The site uses Plausible Analytics for aggregate audience measurement.
+The site uses Cloudflare Web Analytics for aggregate audience and performance measurement.
 
-- no cookies;
+- no analytics cookies;
 - no local storage or persistent visitor identifier;
-- no cross-site tracking;
+- no fingerprinting or cross-site tracking;
 - no advertising or profiling;
 - no consent banner;
 - a dedicated `privacy.html` page explains the measurement.
 
-The Plausible snippet is installed on `index.html`, `download.html`, `404.html` and `privacy.html`.
-The download page itself acts as the aggregate download-intent step before redirecting to the latest GitHub release asset.
+The Cloudflare beacon is installed on `index.html`, `download.html`, `404.html` and `privacy.html`.
 
