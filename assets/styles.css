@@ -216,12 +216,21 @@ h3 {
 }
 
 .hero-visual {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  contain: layout paint;
   border: 1px solid rgba(255,255,255,.15);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
   transform: perspective(1000px) rotateY(-2deg) rotateX(1deg);
   background: white;
+}
+
+.hero-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .strip {

@@ -12,6 +12,7 @@
 
   <link rel="canonical" href="https://tmailletfr.github.io/ProjectEngine/">
   <link rel="icon" href="assets/favicon.png?v=2" type="image/png">
+  <link rel="preload" as="image" href="assets/dashboard.png" fetchpriority="high">
   <link rel="stylesheet" href="assets/styles.css?v=4">
 
   <meta property="og:type" content="website">
@@ -59,11 +60,6 @@
     ]
   }
   </script>
-  <!-- Cloudflare Web Analytics -->
-  <script type="module"
-          src="https://static.cloudflareinsights.com/beacon.min.js"
-          data-cf-beacon='{"token":"202ecf5af10b4638a640319fb2933e1e"}'></script>
-  <!-- End Cloudflare Web Analytics -->
 </head>
 
 <body>
@@ -113,7 +109,7 @@
           </div>
         </div>
         <div class="hero-visual">
-          <img src="assets/dashboard.png" alt="ProjectEngine executive dashboard in Excel" width="1200" height="675">
+          <img src="assets/dashboard.png" alt="ProjectEngine executive dashboard in Excel" width="1200" height="675" loading="eager" fetchpriority="high" decoding="async">
         </div>
       </div>
     </section>
@@ -265,7 +261,6 @@
         <a href="https://github.com/TMailletFR/ProjectEngine/releases/latest">Latest release</a>
         <a href="https://github.com/TMailletFR/ProjectEngine/tree/main/Docs/en">Documentation</a>
         <a href="https://github.com/TMailletFR/ProjectEngine/discussions">Discussions</a>
-        <a href="privacy.html">Privacy & audience measurement</a>
       </div>
       <div class="license">GNU GPL v3.0 · Built by Thibaut Maillet</div>
     </div>
