@@ -24,8 +24,8 @@ Private Const EVENT_HISTORY_SHEET As String = "EVENT_HISTORY"
 Private Const EVENT_HISTORY_TABLE As String = "tbl_EVENT_HISTORY"
 Private Const EVENT_ACK_SHEET As String = "EVENT_ACK"
 Private Const EVENT_ACK_TABLE As String = "tbl_EVENT_ACK"
-Private Const EVENT_HISTORY_HEADER_ROW As Long = 4
-Private Const EVENT_ACK_HEADER_ROW As Long = 3
+Private Const EVENT_HISTORY_HEADER_ROW As Long = 3
+Private Const EVENT_ACK_HEADER_ROW As Long = 2
 
 Private Const EVENT_HISTORY_INFO_LABEL As String = "btn_EventHistory_Info_Label"
 Private Const EVENT_HISTORY_INFO_BG As String = "btn_EventHistory_Info_BG"
@@ -41,7 +41,6 @@ Private gPlanningEventRunActive As Boolean
 Private gEventHistoryShowInfo As Boolean
 Private gEventHistoryShowInfoInitialized As Boolean
 Private gPlanningLanguage As String
-Private gEventHistoryUiStateBootstrapped As Boolean
 Private gEventHistoryInternalWriteDepth As Long
 
 '------------------------------------------------------------------------------
@@ -94,7 +93,7 @@ End Sub
 Public Sub EventHistory_ApplyLanguage(Optional ByVal languageCode As String = "")
 
     If Trim$(languageCode) <> "" Then EventHistory_SetLanguage languageCode
-    Refresh_EventHistory_View
+    Refresh_EventHistory_View False, True
 
 End Sub
 
@@ -103,7 +102,7 @@ End Sub
 ' EN: Returns the Language value without exposing a mutator for source state.
 '------------------------------------------------------------------------------
 
-Private Function EventHistory_CurrentLanguage() As String
+Public Function EventHistory_CurrentLanguage() As String
 
     EnsureEventHistoryState
     EventHistory_CurrentLanguage = gPlanningLanguage
@@ -159,23 +158,7 @@ End Function
 ' EN: Toggles Event History Info state and updates related outputs.
 '------------------------------------------------------------------------------
 Public Sub Toggle_EventHistory_Info()
-
-    Dim wsHistory As Worksheet
-    Dim oldScreenUpdating As Boolean
-
-    EnsureEventHistoryState
-    gEventHistoryShowInfo = Not gEventHistoryShowInfo
-
-    oldScreenUpdating = Application.ScreenUpdating
-    Application.ScreenUpdating = False
-    On Error GoTo SafeExit
-
-    Set wsHistory = EnsurePlanningEventSheet(EVENT_HISTORY_SHEET)
-    EnsureEventHistoryToggleShapes wsHistory
-    RefreshEventHistoryToggleVisuals wsHistory
-
-SafeExit:
-    Application.ScreenUpdating = oldScreenUpdating
+    Settings_ToggleInfoMessages
 
 End Sub
 
@@ -184,25 +167,7 @@ End Sub
 ' EN: Toggles Event History Language state and updates related outputs.
 '------------------------------------------------------------------------------
 Public Sub Toggle_EventHistory_Language()
-
-    Dim oldScreenUpdating As Boolean
-
-    EnsureEventHistoryState
-
-    If UCase$(Trim$(gPlanningLanguage)) = "EN" Then
-        gPlanningLanguage = "FR"
-    Else
-        gPlanningLanguage = "EN"
-    End If
-
-    oldScreenUpdating = Application.ScreenUpdating
-    Application.ScreenUpdating = False
-    On Error GoTo SafeExit
-
-    Refresh_EventHistory_View
-
-SafeExit:
-    Application.ScreenUpdating = oldScreenUpdating
+    Settings_ToggleEventHistoryLanguage
 
 End Sub
 
@@ -292,12 +257,12 @@ Private Sub NormalizeManualEventAckRows(ByVal ws As Worksheet, ByVal Target As R
     If touched Is Nothing Then Exit Sub
 
     For Each rowRange In touched.rows
-        Set acknowledgedCell = Intersect(rowRange.EntireRow, tblAck.ListColumns("Acknowledged").DataBodyRange)
+        Set acknowledgedCell = Intersect(rowRange.EntireRow, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED).DataBodyRange)
         If Not acknowledgedCell Is Nothing Then
             If Trim$(CStr(acknowledgedCell.Cells(1, 1).value)) = "" Then acknowledgedCell.Cells(1, 1).value = True
         End If
 
-        Set severityCell = Intersect(rowRange.EntireRow, tblAck.ListColumns("Severity").DataBodyRange)
+        Set severityCell = Intersect(rowRange.EntireRow, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY).DataBodyRange)
         If Not severityCell Is Nothing Then
             If Trim$(CStr(severityCell.Cells(1, 1).value)) <> "" Then severityCell.Cells(1, 1).value = UCase$(Trim$(CStr(severityCell.Cells(1, 1).value)))
         End If
@@ -310,7 +275,9 @@ End Sub
 ' FR: Rafraichit Event History View a partir de l'etat courant.
 ' EN: Refreshes Event History View from the current state.
 '------------------------------------------------------------------------------
-Public Sub Refresh_EventHistory_View()
+Public Sub Refresh_EventHistory_View( _
+    Optional ByVal hydratePersistedLanguage As Boolean = True, _
+    Optional ByVal propagateErrors As Boolean = False)
 
     Dim perfScope As clsPerfScope
 
@@ -330,8 +297,13 @@ Public Sub Refresh_EventHistory_View()
     Dim eventHash As String
     Dim internalWriteStarted As Boolean
     Dim oldScreenUpdating As Boolean
+    Dim errorNumber As Long
+    Dim errorSource As String
+    Dim errorDescription As String
 
     Set perfScope = Profiler_BeginScope("Refresh_EventHistory_View", "Event History")
+    If hydratePersistedLanguage Then _
+        EventHistory_SetLanguage Settings_GetOwnerLanguage("EVENT")
 
     oldScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
@@ -358,11 +330,11 @@ Public Sub Refresh_EventHistory_View()
 
             Set newRow = tblHistory.ListRows.Add
             With newRow.Range
-                .Cells(1, tblHistory.ListColumns("Date").Index).value = tblAlarm.DataBodyRange.Cells(r, tblAlarm.ListColumns("Date").Index).value
-                .Cells(1, tblHistory.ListColumns("Hour").Index).value = tblAlarm.DataBodyRange.Cells(r, tblAlarm.ListColumns("Time").Index).value
-                .Cells(1, tblHistory.ListColumns("Severity").Index).value = severity
-                .Cells(1, tblHistory.ListColumns("Message").Index).value = msgText
-                .Cells(1, tblHistory.ListColumns("Acknowledged").Index).value = IsEventAcknowledged(ackLookup, severity, eventType, eventHash)
+                .Cells(1, SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_DATE).Index).value = tblAlarm.DataBodyRange.Cells(r, tblAlarm.ListColumns("Date").Index).value
+                .Cells(1, SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_HOUR).Index).value = tblAlarm.DataBodyRange.Cells(r, tblAlarm.ListColumns("Time").Index).value
+                .Cells(1, SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_SEVERITY).Index).value = severity
+                .Cells(1, SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_MESSAGE).Index).value = msgText
+                .Cells(1, SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_ACKNOWLEDGED).Index).value = IsEventAcknowledged(ackLookup, severity, eventType, eventHash)
             End With
         Next r
     End If
@@ -376,9 +348,14 @@ CleanExit:
         EndPlanningEventInternalWrite wsAlarm, wsHistory, wsAck
     End If
     Application.ScreenUpdating = oldScreenUpdating
+    If errorNumber <> 0 And propagateErrors Then _
+        Err.Raise errorNumber, errorSource, errorDescription
     Exit Sub
 
 CleanFail:
+    errorNumber = Err.Number
+    errorSource = Err.Source
+    errorDescription = Err.Description
     Resume CleanExit
 
 End Sub
@@ -1307,10 +1284,13 @@ Private Sub MigrateEventHistoryHourHeader(ByVal tbl As ListObject)
 
     On Error Resume Next
     Set legacyColumn = tbl.ListColumns("Heure")
-    Set hourColumn = tbl.ListColumns("Hour")
+    Set hourColumn = SchemaListColumn(tbl, VTS_TABLE_EVENT_HISTORY, VTS_COL_HOUR)
     On Error GoTo 0
 
     If legacyColumn Is Nothing Then Exit Sub
+    If Not hourColumn Is Nothing Then
+        If legacyColumn.Index = hourColumn.Index Then Exit Sub
+    End If
 
     If hourColumn Is Nothing Then
         legacyColumn.Name = "Hour"
@@ -1335,78 +1315,15 @@ End Sub
 '------------------------------------------------------------------------------
 Private Sub EnsureEventHistoryState()
 
-    BootstrapEventHistoryUiStateFromSheet
-
     If Not gEventHistoryShowInfoInitialized Then
-        gEventHistoryShowInfo = True
+        gEventHistoryShowInfo = Settings_GetInfoEnabled()
         gEventHistoryShowInfoInitialized = True
     End If
 
-    If Trim$(gPlanningLanguage) = "" Then gPlanningLanguage = "FR"
+    If Trim$(gPlanningLanguage) = "" Then _
+        gPlanningLanguage = Settings_GetOwnerLanguage("EVENT")
 
 End Sub
-
-'------------------------------------------------------------------------------
-' FR: Traite la reference Bootstrap Event History Ui State From Sheet sans modifier les donnees d'entree.
-' EN: Handles the Bootstrap Event History Ui State From Sheet reference without mutating input data.
-'------------------------------------------------------------------------------
-
-Private Sub BootstrapEventHistoryUiStateFromSheet()
-
-    Dim ws As Worksheet
-    Dim isOn As Boolean
-
-    If gEventHistoryUiStateBootstrapped Then Exit Sub
-    gEventHistoryUiStateBootstrapped = True
-
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(EVENT_HISTORY_SHEET)
-    On Error GoTo 0
-    If ws Is Nothing Then Exit Sub
-
-    If TryReadEventHistoryTwoStateToggle(ws, EVENT_HISTORY_INFO_BG, EVENT_HISTORY_INFO_KNOB, isOn) Then
-        gEventHistoryShowInfo = isOn
-        gEventHistoryShowInfoInitialized = True
-    End If
-
-    If TryReadEventHistoryTwoStateToggle(ws, EVENT_HISTORY_LANG_BG, EVENT_HISTORY_LANG_KNOB, isOn) Then
-        If isOn Then
-            gPlanningLanguage = "EN"
-        Else
-            gPlanningLanguage = "FR"
-        End If
-    End If
-
-End Sub
-
-'------------------------------------------------------------------------------
-' FR: Retourne la reference Try Read Event History Two State Toggle sans modifier les donnees d'entree.
-' EN: Returns the Try Read Event History Two State Toggle reference without mutating input data.
-' FR - Effet de bord : cree ou met a jour des shapes Excel.
-' EN - Side effect: creates or updates Excel shapes.
-'------------------------------------------------------------------------------
-
-Private Function TryReadEventHistoryTwoStateToggle( _
-    ByVal ws As Worksheet, _
-    ByVal bgName As String, _
-    ByVal knobName As String, _
-    ByRef isOn As Boolean) As Boolean
-
-    Dim bg As Shape
-    Dim knob As Shape
-
-    On Error Resume Next
-    Set bg = ws.Shapes(bgName)
-    Set knob = ws.Shapes(knobName)
-    On Error GoTo 0
-
-    If bg Is Nothing Then Exit Function
-    If knob Is Nothing Then Exit Function
-
-    isOn = ((knob.Left + (knob.Width / 2)) >= (bg.Left + (bg.Width / 2)))
-    TryReadEventHistoryTwoStateToggle = True
-
-End Function
 
 '------------------------------------------------------------------------------
 ' FR: Construit la valeur Event History Display Message a partir des donnees fournies par l'appelant.
@@ -1470,11 +1387,11 @@ Private Function BuildEventAckLookup(ByVal tblAck As ListObject) As Object
     End If
 
     For r = 1 To tblAck.ListRows.Count
-        severity = UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Severity").Index).value)))
-        eventType = Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Event Type").Index).value))
-        eventHash = Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Hash").Index).value))
+        severity = UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY).Index).value)))
+        eventType = Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EVENT_TYPE).Index).value))
+        eventHash = Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_HASH).Index).value))
 
-        If severity = "WARNING" And IsTruthy(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Acknowledged").Index).value) Then
+        If severity = "WARNING" And IsTruthy(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED).Index).value) Then
             If eventType <> "" And eventHash <> "" Then
                 lookup(BuildEventAckKey(severity, eventType, eventHash)) = True
             End If
@@ -1606,9 +1523,9 @@ Private Sub UpsertPlanningWarningAckToken( _
 
     If Not tblAck.DataBodyRange Is Nothing Then
         For r = 1 To tblAck.ListRows.Count
-            If UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Severity").Index).value))) = "WARNING" And _
-               UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Event Type").Index).value))) = UCase$(eventType) And _
-               Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Hash").Index).value)) = eventHash Then
+            If UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY).Index).value))) = "WARNING" And _
+               UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EVENT_TYPE).Index).value))) = UCase$(eventType) And _
+               Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_HASH).Index).value)) = eventHash Then
 
                 Set targetRow = tblAck.ListRows(r)
                 Exit For
@@ -1619,16 +1536,16 @@ Private Sub UpsertPlanningWarningAckToken( _
     If targetRow Is Nothing Then Set targetRow = tblAck.ListRows.Add
 
     With targetRow.Range
-        .Cells(1, tblAck.ListColumns("Hash").Index).value = eventHash
-        .Cells(1, tblAck.ListColumns("Severity").Index).value = "WARNING"
-        .Cells(1, tblAck.ListColumns("Event Type").Index).value = eventType
-        .Cells(1, tblAck.ListColumns("Acknowledged").Index).value = True
-        .Cells(1, tblAck.ListColumns("Acknowledged At").Index).value = Now
-        .Cells(1, tblAck.ListColumns("Acknowledged By").Index).value = Environ$("USERNAME")
-        .Cells(1, tblAck.ListColumns("WBS").Index).value = wbsValue
-        .Cells(1, tblAck.ListColumns("Task Name").Index).value = taskName
-        .Cells(1, tblAck.ListColumns("FR Message").Index).value = frMessage
-        .Cells(1, tblAck.ListColumns("EN Message").Index).value = enMessage
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_HASH).Index).value = eventHash
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY).Index).value = "WARNING"
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EVENT_TYPE).Index).value = eventType
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED).Index).value = True
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED_AT).Index).value = Now
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED_BY).Index).value = Environ$("USERNAME")
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_WBS).Index).value = wbsValue
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_TASK_NAME).Index).value = taskName
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_FR_MESSAGE).Index).value = frMessage
+        .Cells(1, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EN_MESSAGE).Index).value = enMessage
     End With
 
 End Sub
@@ -1716,9 +1633,9 @@ Private Sub RemovePlanningWarningAckToken(ByVal ackToken As String)
     If tblAck.DataBodyRange Is Nothing Then Exit Sub
 
     For r = tblAck.ListRows.Count To 1 Step -1
-        If UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Severity").Index).value))) = "WARNING" And _
-           UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Event Type").Index).value))) = UCase$(eventType) And _
-           Trim$(CStr(tblAck.DataBodyRange.Cells(r, tblAck.ListColumns("Hash").Index).value)) = eventHash Then
+        If UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY).Index).value))) = "WARNING" And _
+           UCase$(Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EVENT_TYPE).Index).value))) = UCase$(eventType) And _
+           Trim$(CStr(tblAck.DataBodyRange.Cells(r, SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_HASH).Index).value)) = eventHash Then
 
             tblAck.ListRows(r).Delete
         End If
@@ -1800,8 +1717,13 @@ Private Sub ApplyPlanningEventFormats( _
 
     Dim r As Long
     Dim sev As String
+    Dim dateFormat As String
+    Dim dateTimeFormat As String
 
     On Error Resume Next
+
+    dateFormat = Settings_GetDateNumberFormat()
+    dateTimeFormat = Settings_GetDateTimeNumberFormat()
 
     tblAlarm.ListColumns("Event ID").Range.NumberFormat = "@"
     tblAlarm.ListColumns("Run ID").Range.NumberFormat = "@"
@@ -1825,25 +1747,25 @@ Private Sub ApplyPlanningEventFormats( _
         tblAlarm.ListColumns("Time").DataBodyRange.NumberFormat = "hh:mm:ss"
     End If
 
-    tblHistory.ListColumns("Severity").Range.NumberFormat = "@"
-    tblHistory.ListColumns("Message").Range.NumberFormat = "@"
-    tblAck.ListColumns("Hash").Range.NumberFormat = "@"
-    tblAck.ListColumns("Severity").Range.NumberFormat = "@"
-    tblAck.ListColumns("Event Type").Range.NumberFormat = "@"
-    tblAck.ListColumns("Acknowledged By").Range.NumberFormat = "@"
-    tblAck.ListColumns("Comment").Range.NumberFormat = "@"
-    tblAck.ListColumns("WBS").Range.NumberFormat = "@"
-    tblAck.ListColumns("Task Name").Range.NumberFormat = "@"
-    tblAck.ListColumns("FR Message").Range.NumberFormat = "@"
-    tblAck.ListColumns("EN Message").Range.NumberFormat = "@"
+    SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_SEVERITY).Range.NumberFormat = "@"
+    SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_MESSAGE).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_HASH).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EVENT_TYPE).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED_BY).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_COMMENT).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_WBS).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_TASK_NAME).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_FR_MESSAGE).Range.NumberFormat = "@"
+    SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_EN_MESSAGE).Range.NumberFormat = "@"
 
     If Not tblHistory.DataBodyRange Is Nothing Then
-        tblHistory.ListColumns("Date").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-        tblHistory.ListColumns("Hour").DataBodyRange.NumberFormat = "hh:mm:ss"
-        tblHistory.ListColumns("Message").DataBodyRange.WrapText = True
+        SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_DATE).DataBodyRange.NumberFormat = dateFormat
+        SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_HOUR).DataBodyRange.NumberFormat = "hh:mm:ss"
+        SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_MESSAGE).DataBodyRange.WrapText = True
 
         For r = 1 To tblHistory.ListRows.Count
-            sev = UCase$(Trim$(CStr(tblHistory.DataBodyRange.Cells(r, tblHistory.ListColumns("Severity").Index).value)))
+            sev = UCase$(Trim$(CStr(tblHistory.DataBodyRange.Cells(r, SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_SEVERITY).Index).value)))
             Select Case sev
                 Case "ERROR", "STOP"
                     tblHistory.DataBodyRange.rows(r).Interior.Color = RGB(255, 235, 238)
@@ -1858,14 +1780,14 @@ Private Sub ApplyPlanningEventFormats( _
     End If
 
     If Not tblAck.DataBodyRange Is Nothing Then
-        tblAck.ListColumns("Acknowledged At").DataBodyRange.NumberFormat = "dd/mm/yyyy hh:mm:ss"
+        SchemaListColumn(tblAck, VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED_AT).DataBodyRange.NumberFormat = dateTimeFormat
     End If
 
     tblAlarm.Range.Columns.AutoFit
     tblHistory.Range.Columns.AutoFit
     tblAck.Range.Columns.AutoFit
-    tblHistory.ListColumns("Message").Range.ColumnWidth = 72
-    tblHistory.ListColumns("Message").Range.WrapText = True
+    SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_MESSAGE).Range.ColumnWidth = 72
+    SchemaListColumn(tblHistory, VTS_TABLE_EVENT_HISTORY, VTS_COL_MESSAGE).Range.WrapText = True
     tblHistory.Range.VerticalAlignment = xlTop
     tblAck.Range.VerticalAlignment = xlTop
     tblHistory.Range.EntireRow.Hidden = False
@@ -2305,11 +2227,11 @@ End Function
 Private Function EventHistoryHeaders() As Variant
 
     EventHistoryHeaders = Array( _
-        "Date", _
-        "Hour", _
-        "Severity", _
-        "Message", _
-        "Acknowledged")
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_HISTORY, VTS_COL_DATE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_HISTORY, VTS_COL_HOUR), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_HISTORY, VTS_COL_SEVERITY), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_HISTORY, VTS_COL_MESSAGE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_HISTORY, VTS_COL_ACKNOWLEDGED))
 
 End Function
 
@@ -2321,17 +2243,17 @@ End Function
 Private Function EventAckHeaders() As Variant
 
     EventAckHeaders = Array( _
-        "Hash", _
-        "Severity", _
-        "Event Type", _
-        "Acknowledged", _
-        "Acknowledged At", _
-        "Acknowledged By", _
-        "Comment", _
-        "WBS", _
-        "Task Name", _
-        "FR Message", _
-        "EN Message")
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_HASH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_SEVERITY), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_EVENT_TYPE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED_AT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_ACKNOWLEDGED_BY), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_COMMENT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_WBS), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_TASK_NAME), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_FR_MESSAGE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_EVENT_ACK, VTS_COL_EN_MESSAGE))
 
 End Function
 

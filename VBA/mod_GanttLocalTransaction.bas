@@ -29,6 +29,33 @@ Public Sub GanttLocal_Invalidate(Optional ByVal reason As String = "")
 
 End Sub
 
+Public Sub GanttLocal_ForgetIds( _
+    ByVal ids As Object, _
+    Optional ByVal reason As String = "")
+
+    Dim key As Variant
+    Dim removedCount As Long
+
+    If ids Is Nothing Then Exit Sub
+    If gCommittedSnapshot Is Nothing Then Exit Sub
+
+    For Each key In ids.keys
+        If gCommittedSnapshot.Exists(CStr(key)) Then
+            gCommittedSnapshot.Remove CStr(key)
+            removedCount = removedCount + 1
+        End If
+    Next key
+
+    If removedCount > 0 Then
+        gSnapshotVersion = gSnapshotVersion + 1
+        Profiler_RecordOperation "GanttLocalForgotIds", removedCount, 0#
+        If Len(Trim$(reason)) > 0 Then
+            Profiler_RecordOperation "GanttLocalForgotIds_" & reason, removedCount, 0#
+        End If
+    End If
+
+End Sub
+
 Public Function GanttLocal_HasCommittedSnapshot() As Boolean
 
     GanttLocal_HasCommittedSnapshot = Not gCommittedSnapshot Is Nothing
@@ -130,8 +157,8 @@ Public Function GanttLocal_BuildChangeSet( _
     rowCount = UBound(dataArr, 1)
 
     For r = 1 To rowCount
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
-        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+        idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
+        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
 
         If idVal <> "" Then
             rowSignature = GanttLocal_BuildRowSignature( _
@@ -301,8 +328,8 @@ Private Function GanttLocal_BuildRowSignature( _
     progressVal = GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode)
 
     isParent = hasChildren.Exists(wbs)
-    isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, rowIndex)
-    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, rowIndex)
+    isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, rowIndex, VTS_COL_TASK_TYPE)
+    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, rowIndex, VTS_COL_TASK_TYPE)
     isHighlighted = ShouldHighlightGanttAnalyticsPath( _
         dataArr, mapWBS, rowIndex, idVal, testById, isTestMode)
     separator = Chr$(30)
@@ -315,8 +342,8 @@ Private Function GanttLocal_BuildRowSignature( _
         GanttLocal_ValueSignature(progressVal) & separator & _
         CStr(isParent) & separator & CStr(isMilestone) & separator & _
         CStr(isLoE) & separator & CStr(isHighlighted) & separator & _
-        Trim$(CStr(dataArr(rowIndex, mapWBS("Predecessors WBS")))) & separator & _
-        Trim$(CStr(dataArr(rowIndex, mapWBS("Task Name"))))
+        Trim$(CStr(dataArr(rowIndex, mapWBS(VTS_COL_PREDECESSORS_WBS)))) & separator & _
+        Trim$(CStr(dataArr(rowIndex, mapWBS(VTS_COL_TASK_NAME))))
 
 End Function
 

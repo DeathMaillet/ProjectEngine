@@ -756,7 +756,7 @@ Private Function ShouldShowGanttRow(ByVal ws As Worksheet, ByVal rowNum As Long)
     If tblWBS.DataBodyRange Is Nothing Then Exit Function
     If dataRow > tblWBS.ListRows.Count Then Exit Function
 
-    summaryDisplayVal = UCase$(Trim$(CStr(tblWBS.DataBodyRange.cells(dataRow, tblWBS.ListColumns("S").Index).value)))
+    summaryDisplayVal = UCase$(Trim$(CStr(tblWBS.DataBodyRange.cells(dataRow, SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_S).Index).value)))
     ShouldShowGanttRow = (summaryDisplayVal = "Y")
 
 SafeExit:

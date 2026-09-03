@@ -46,8 +46,10 @@ Public Function EventHistoryHarness_Smoke(ByVal capturePath As String) As String
     PlanningConsolePolicy_DisableNonInteractive
     EventHistory_SetLanguage "EN"
     EventHistory_SetShowInfo True
-    ClearPlanningWarningAcknowledgements
     ClearPlanningEventHistory
+    EventHistoryHarness_Trace "03a event history reset ok"
+    ClearPlanningWarningAcknowledgements
+    EventHistoryHarness_Trace "03b acknowledgements reset ok"
     EventHistoryHarness_Trace "03 reset ok"
 
     eventHash = BuildPlanningEventHash( _
@@ -104,12 +106,12 @@ Public Function EventHistoryHarness_Smoke(ByVal capturePath As String) As String
         "FR:" & vbCrLf & "Francais" & vbCrLf & vbCrLf & _
         "EN:" & vbCrLf & "English")
     EventHistoryHarness_Assert formattedText = "English", "language starts EN"
-    Toggle_EventHistory_Language
-    EventHistoryHarness_Trace "11 language toggle returned"
+    EventHistory_SetLanguage "FR"
+    EventHistoryHarness_Trace "11 runtime language set returned"
     formattedText = FormatPlanningConsoleMessageForCurrentLanguage( _
         "FR:" & vbCrLf & "Francais" & vbCrLf & vbCrLf & _
         "EN:" & vbCrLf & "English")
-    EventHistoryHarness_Assert formattedText = "Francais", "language toggle switches to FR"
+    EventHistoryHarness_Assert formattedText = "Francais", "runtime language switches to FR"
     EventHistory_SetLanguage "EN"
 
     Settings_Initialize
@@ -124,7 +126,11 @@ Public Function EventHistoryHarness_Smoke(ByVal capturePath As String) As String
 
     EventHistory_SetLanguage "EN"
     ThisWorkbook.Worksheets("SETTINGS").Range("X8").value = "EN"
+    VisibleHeaders_MaterializePersistedLanguages
+    PlanningConsolePolicy_EnableNonInteractive _
+        capturePath & ".language.tsv", "EventHistoryHarness.LanguageClick"
     Settings_ToggleEventHistoryLanguage
+    PlanningConsolePolicy_DisableNonInteractive
     EventHistoryHarness_Trace "15 settings event language toggle returned"
     formattedText = FormatPlanningConsoleMessageForCurrentLanguage( _
         "FR:" & vbCrLf & "Parametres FR" & vbCrLf & vbCrLf & _

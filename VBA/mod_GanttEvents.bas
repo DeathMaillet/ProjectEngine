@@ -30,6 +30,7 @@ Public Sub Handle_Gantt_Change(ByVal ws As Worksheet, ByVal Target As Range)
     Dim oldEvents As Boolean
     Dim shouldReconcileWatch As Boolean
     Dim errNumber As Long
+    Dim dateFormat As String
 
     Const COL_TEST_START As Long = 5
     Const COL_TEST_FINISH As Long = 6
@@ -40,6 +41,7 @@ Public Sub Handle_Gantt_Change(ByVal ws As Worksheet, ByVal Target As Range)
     On Error GoTo SafeExit
 
     Set consoleMessages = New Collection
+    dateFormat = Settings_GetDateNumberFormat()
 
     If Target Is Nothing Then Exit Sub
 
@@ -87,7 +89,7 @@ Public Sub Handle_Gantt_Change(ByVal ws As Worksheet, ByVal Target As Range)
                 Else
 
                     cell.value = CDate(cell.value)
-                    cell.NumberFormat = "dd/mm/yyyy"
+                    cell.NumberFormat = dateFormat
 
                 End If
 

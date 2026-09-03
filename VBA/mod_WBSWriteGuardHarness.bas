@@ -166,7 +166,7 @@ Private Function WBSWriteGuardHarness_TestWriterErrorPaths( _
 
     On Error GoTo Fail
 
-    firstId = Trim$(CStr(tblWBS.ListColumns("ID").DataBodyRange.Cells(1, 1).Value))
+    firstId = Trim$(CStr(SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ID).DataBodyRange.Cells(1, 1).Value))
     Set impactedIds = CreateObject("Scripting.Dictionary")
     impactedIds(firstId) = True
 
@@ -338,7 +338,7 @@ Private Sub WBSWriteGuardHarness_TestWorksheetEvent( _
 
     Dim targetCell As Range
 
-    Set targetCell = tblWBS.ListColumns("Calculated Start").DataBodyRange.Cells(1, 1)
+    Set targetCell = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_CALCULATED_START).DataBodyRange.Cells(1, 1)
 
     WBSWriteGuardHarness_Reset
     BeginMacroRun "WBSWriteGuardHarnessAuthorizedEvent"
@@ -370,7 +370,7 @@ Private Sub WBSWriteGuardHarness_TestBalancedWriters( _
     Dim impactedIds As Object
     Dim firstId As String
 
-    firstId = Trim$(CStr(tblWBS.ListColumns("ID").DataBodyRange.Cells(1, 1).Value))
+    firstId = Trim$(CStr(SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ID).DataBodyRange.Cells(1, 1).Value))
     WBSWriteGuardHarness_Assert firstId <> vbNullString, "first WBS row has ID"
 
     Set impactedIds = CreateObject("Scripting.Dictionary")
@@ -430,11 +430,11 @@ Private Function WBSWriteGuardHarness_CharacterizePartialPreBeginError( _
 
     On Error GoTo Fail
 
-    firstId = Trim$(CStr(tblWBS.ListColumns("ID").DataBodyRange.Cells(1, 1).Value))
+    firstId = Trim$(CStr(SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ID).DataBodyRange.Cells(1, 1).Value))
     Set impactedIds = CreateObject("Scripting.Dictionary")
     impactedIds(firstId) = True
 
-    Set targetColumn = tblWBS.ListColumns("Deadline Float")
+    Set targetColumn = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_DEADLINE_FLOAT)
     originalName = targetColumn.Name
 
     WBSWriteGuardHarness_Reset
@@ -525,7 +525,7 @@ Private Function WBSWriteGuardHarness_CharacterizeAnalyticsPreBeginError( _
 
     On Error GoTo Fail
 
-    Set targetColumn = tblWBS.ListColumns("ID")
+    Set targetColumn = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ID)
     originalName = targetColumn.Name
 
     WBSWriteGuardHarness_Reset

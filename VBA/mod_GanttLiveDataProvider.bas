@@ -151,7 +151,7 @@ Public Function BuildGanttRowByWbsMap(ByVal ws As Worksheet) As Object
 
     If Not tblWBS Is Nothing Then
         If Not tblWBS.DataBodyRange Is Nothing Then
-            wbsColumnIndex = tblWBS.ListColumns("WBS").Index
+            wbsColumnIndex = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_WBS).Index
             wbsValues = tblWBS.DataBodyRange.Columns(wbsColumnIndex).Value2
 
             For r = 1 To UBound(wbsValues, 1)
@@ -178,12 +178,12 @@ Public Sub ValidateGanttTestSourceColumns(ByVal mapWBS As Object, ByVal mapCalc 
     Dim c As Variant
 
     reqWBS = Array( _
-        "ID", "WBS", "Task Type", "Cal", _
-        "Calculated Start", "Calculated Finish", "Calculated Duration", _
-        "% Progress", "Driving Logic", _
-        "Actual Start", "Actual Finish", _
-        "Forecast Start", "Forecast Finish", _
-        "Baseline Start", "Baseline Duration")
+        VTS_COL_ID, VTS_COL_WBS, VTS_COL_TASK_TYPE, VTS_COL_CAL, _
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH, VTS_COL_CALCULATED_DURATION, _
+        VTS_COL_PROGRESS_PERCENT, VTS_COL_DRIVING_LOGIC, _
+        VTS_COL_ACTUAL_START, VTS_COL_ACTUAL_FINISH, _
+        VTS_COL_FORECAST_START, VTS_COL_FORECAST_FINISH, _
+        VTS_COL_BASELINE_START, VTS_COL_BASELINE_DURATION)
 
     reqCalc = Array("ID", "Predecessors WBS", "Driving Logic")
 
@@ -350,14 +350,14 @@ Public Function BuildTaskNameByIdFromWbs_Live() As Object
 
     Set mapWBS = CanonicalIdentity_BuildColumnMap(tblWBS)
 
-    Call RequireMapColumn_GanttLive(mapWBS, "tbl_WBS", "ID", "BuildTaskNameByIdFromWbs_Live")
-    Call RequireMapColumn_GanttLive(mapWBS, "tbl_WBS", "Task Name", "BuildTaskNameByIdFromWbs_Live")
+    Call RequireMapColumn_GanttLive(mapWBS, "tbl_WBS", VTS_COL_ID, "BuildTaskNameByIdFromWbs_Live")
+    Call RequireMapColumn_GanttLive(mapWBS, "tbl_WBS", VTS_COL_TASK_NAME, "BuildTaskNameByIdFromWbs_Live")
 
     arr = tblWBS.DataBodyRange.value
 
     For r = 1 To UBound(arr, 1)
-        idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
-        If idVal <> "" Then d(idVal) = arr(r, mapWBS("Task Name"))
+        idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
+        If idVal <> "" Then d(idVal) = arr(r, mapWBS(VTS_COL_TASK_NAME))
     Next r
 
     Set BuildTaskNameByIdFromWbs_Live = d
@@ -430,8 +430,8 @@ Public Function BuildIdToWbsMapFromWBS_Live() As Object
     arr = tblWBS.DataBodyRange.value
 
     For r = 1 To UBound(arr, 1)
-        idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(CStr(arr(r, mapWBS("WBS"))))
+        idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(CStr(arr(r, mapWBS(VTS_COL_WBS))))
 
         If idVal <> "" And wbsVal <> "" Then
             d(idVal) = wbsVal
@@ -650,18 +650,18 @@ Public Function BuildRawWbsSourceById_Live() As Object
     arr = tblWBS.DataBodyRange.value
 
     For r = 1 To UBound(arr, 1)
-        idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
 
         If idVal <> "" Then
             d(idVal) = Array( _
-                GetCellValue(arr(r, mapWBS("Actual Start"))), _
-                GetCellValue(arr(r, mapWBS("Actual Finish"))), _
-                GetCellValue(arr(r, mapWBS("Forecast Start"))), _
-                GetCellValue(arr(r, mapWBS("Forecast Finish"))), _
-                GetCellValue(arr(r, mapWBS("Baseline Start"))), _
-                GetCellValue(arr(r, mapWBS("Baseline Duration"))), _
-                GetCellValue(arr(r, mapWBS("% Progress"))), _
-                NormalizeCalendarType(arr(r, mapWBS("Cal"))) _
+                GetCellValue(arr(r, mapWBS(VTS_COL_ACTUAL_START))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_ACTUAL_FINISH))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_FORECAST_START))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_FORECAST_FINISH))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_BASELINE_START))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_BASELINE_DURATION))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_PROGRESS_PERCENT))), _
+                NormalizeCalendarType(arr(r, mapWBS(VTS_COL_CAL))) _
             )
         End If
     Next r
@@ -669,4 +669,3 @@ Public Function BuildRawWbsSourceById_Live() As Object
     Set BuildRawWbsSourceById_Live = d
 
 End Function
-

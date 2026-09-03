@@ -13,7 +13,7 @@ Option Explicit
 ' Owns persisted settings, per-domain languages and Settings panel controls.
 ' Does not decide planning calculation policy.
 '
-' CONTRATS / CONTRACTS : Settings_Initialize, Settings_HydrateRuntimeState, Settings_ApplyLanguages, Settings_ToggleInfoMessages, Settings_ToggleGlobalLanguage, Settings_ToggleGlobalActivated, Settings_ToggleDashboardLanguage, Settings_ToggleGanttLanguage
+' CONTRATS / CONTRACTS : Settings_Initialize, Settings_HydrateRuntimeState, Settings_GetOwnerLanguage, Settings_ToggleInfoMessages, Settings_ToggleGlobalLanguage, Settings_ToggleGlobalActivated
 ' CALLBACKS EXTERNES / EXTERNAL CALLBACKS : Aucun / None
 '===============================================================================
 
@@ -29,11 +29,43 @@ Private Const CELL_SCURVE_LANGUAGE As String = "X6"
 Private Const CELL_WBS_LANGUAGE As String = "X7"
 Private Const CELL_EVENT_LANGUAGE As String = "X8"
 Private Const CELL_INFO_ENABLED As String = "X9"
+Private Const CELL_CONSTRAINTS_LANGUAGE As String = "X10"
+Private Const CELL_DATE_DISPLAY_MODE As String = "X11"
+Private Const SETTINGS_STORAGE_VERSION As String = "SETTINGS_STORAGE_V2"
+
+Private Const DATE_MODE_DMY As String = "DMY"
+Private Const DATE_MODE_MDY As String = "MDY"
+Private Const DATE_MODE_ISO As String = "ISO"
+
+Private Const DATE_FORMAT_DMY As String = "dd/mm/yyyy"
+Private Const DATE_FORMAT_MDY As String = "mm/dd/yyyy"
+Private Const DATE_FORMAT_ISO As String = "yyyy-mm-dd"
+Private Const DATETIME_FORMAT_DMY As String = "dd/mm/yyyy hh:mm:ss"
+Private Const DATETIME_FORMAT_MDY As String = "mm/dd/yyyy hh:mm:ss"
+Private Const DATETIME_FORMAT_ISO As String = "yyyy-mm-dd hh:mm:ss"
+Private Const DATE_COMPACT_FORMAT_DMY As String = "dd/mm"
+Private Const DATE_COMPACT_FORMAT_MDY As String = "mm/dd"
+Private Const DATE_COMPACT_FORMAT_ISO As String = "yyyy-mm-dd"
+
+Private Const DATE_CONTROL_LABEL_NAME As String = "SET_DATE_FORMAT_VALUES"
+Private Const DATE_CONTROL_BG_NAME As String = "SET_DATE_FORMAT_TRACK"
+Private Const DATE_CONTROL_KNOB_NAME As String = "SET_DATE_FORMAT_KNOB"
+
+Private Const GANTT_REFERENCE_TRACK_WIDTH As Double = 28
+Private Const GANTT_THREE_POSITION_TRACK_WIDTH As Double = 46
+Private Const GANTT_REFERENCE_TRACK_HEIGHT As Double = 12
+Private Const GANTT_REFERENCE_KNOB_SIZE As Double = 9
+Private Const GANTT_REFERENCE_LABEL_GAP As Double = 7
+Private Const SETTINGS_TRACK_WIDTH As Double = 44
+Private Const SETTINGS_TRACK_HEIGHT As Double = 16
+Private Const SETTINGS_KNOB_SIZE As Double = 12
+Private Const DATE_CONTROL_LABEL_WIDTH As Double = 104
 
 Private Const MODULE_DASHBOARD As String = "DASHBOARD"
 Private Const MODULE_GANTT As String = "GANTT"
 Private Const MODULE_SCURVE As String = "SCURVE"
 Private Const MODULE_WBS As String = "WBS"
+Private Const MODULE_CONSTRAINTS As String = "CONSTRAINTS"
 Private Const MODULE_EVENT As String = "EVENT"
 
 '------------------------------------------------------------------------------
@@ -54,9 +86,7 @@ Public Sub Settings_Initialize()
     Application.ScreenUpdating = False
 
     Set ws = Settings_EnsureSheet()
-    Settings_InitializeStorage ws
     Settings_BuildLayout ws
-    Settings_ApplyLanguages
 
 SafeExit:
     Application.ScreenUpdating = oldScreenUpdating
@@ -70,76 +100,77 @@ End Sub
 '------------------------------------------------------------------------------
 Public Sub Settings_HydrateRuntimeState()
 
-    Dim ws As Worksheet
-    Dim oldEvents As Boolean
-    Dim oldScreenUpdating As Boolean
-    Dim globalLanguage As String
-
-    On Error GoTo SafeExit
-
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(SETTINGS_SHEET)
-    On Error GoTo SafeExit
-
-    If ws Is Nothing Then
-        Settings_Initialize
-        Exit Sub
-    End If
-
-    oldEvents = Application.EnableEvents
-    oldScreenUpdating = Application.ScreenUpdating
-    Application.EnableEvents = False
-    Application.ScreenUpdating = False
-
-    Settings_InitializeStorage ws
-
-    globalLanguage = Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).value), "EN")
-    If Settings_GlobalIsActivated(ws) Then
-        Settings_WriteAllModuleLanguages ws, globalLanguage
-    End If
-
-    EventHistory_SetShowInfo Settings_InfoIsEnabled(ws)
-    EventHistory_SetLanguage Settings_ModuleLanguage(ws, MODULE_EVENT)
-    WBS_SetLanguage Settings_ModuleLanguage(ws, MODULE_WBS)
-    Gantt_SetLanguage Settings_ModuleLanguage(ws, MODULE_GANTT)
-    SCurve_SetLanguage Settings_ModuleLanguage(ws, MODULE_SCURVE)
-    Dashboard_SetLanguage Settings_ModuleLanguage(ws, MODULE_DASHBOARD)
-
-SafeExit:
-    Application.ScreenUpdating = oldScreenUpdating
-    Application.EnableEvents = oldEvents
+    EventHistory_SetShowInfo Settings_GetInfoEnabled()
+    EventHistory_SetLanguage Settings_GetOwnerLanguage(MODULE_EVENT)
+    WBS_SetLanguage Settings_GetOwnerLanguage(MODULE_WBS)
+    Gantt_SetLanguage Settings_GetOwnerLanguage(MODULE_GANTT)
+    SCurve_SetLanguage Settings_GetOwnerLanguage(MODULE_SCURVE)
+    Dashboard_SetLanguage Settings_GetOwnerLanguage(MODULE_DASHBOARD)
+    Constraints_SetLanguage Settings_GetOwnerLanguage(MODULE_CONSTRAINTS)
 
 End Sub
 '------------------------------------------------------------------------------
-' FR: Met a jour Settings Apply Languages dans le contexte settings and language.
-' EN: Updates Settings Apply Languages in the settings and language context.
+' FR: Retourne la langue persistante d'un owner sans modifier le workbook.
+' EN: Returns an owner's persisted language without mutating the workbook.
 '------------------------------------------------------------------------------
-Public Sub Settings_ApplyLanguages()
+Public Function Settings_GetOwnerLanguage(ByVal ownerKey As String) As String
+
+    Dim ws As Worksheet
+    Dim globalLanguage As String
+    Dim storageCell As String
+
+    On Error GoTo UseFallback
+    Set ws = ThisWorkbook.Worksheets(SETTINGS_SHEET)
+    globalLanguage = Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).Value2), "EN")
+    storageCell = Settings_ModuleStorageCell(ownerKey)
+    If storageCell = "" Then
+        Settings_GetOwnerLanguage = globalLanguage
+    Else
+        Settings_GetOwnerLanguage = _
+            Settings_NormalizeLanguage(CStr(ws.Range(storageCell).Value2), globalLanguage)
+    End If
+    Exit Function
+
+UseFallback:
+    Settings_GetOwnerLanguage = "EN"
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne le reglage Info persiste sans modifier le workbook.
+' EN: Returns the persisted Info setting without mutating the workbook.
+'------------------------------------------------------------------------------
+Public Function Settings_GetInfoEnabled() As Boolean
+
+    Dim ws As Worksheet
+
+    On Error GoTo UseFallback
+    Set ws = ThisWorkbook.Worksheets(SETTINGS_SHEET)
+    Settings_GetInfoEnabled = Settings_InfoIsEnabled(ws)
+    Exit Function
+
+UseFallback:
+    Settings_GetInfoEnabled = True
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Migre explicitement le stockage de langue vers le schema V2.
+' EN: Explicitly migrates language storage to the V2 schema.
+'------------------------------------------------------------------------------
+Public Sub Settings_MigrateLanguageStorageV2()
 
     Dim ws As Worksheet
     Dim globalLanguage As String
 
-    On Error GoTo SafeExit
-
     Set ws = Settings_EnsureSheet()
-    Settings_InitializeStorage ws
+    globalLanguage = Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).Value2), "EN")
 
-    globalLanguage = Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).value), "EN")
-
-    If Settings_GlobalIsActivated(ws) Then
-        Settings_WriteAllModuleLanguages ws, globalLanguage
+    If Not Settings_IsRecognizedLanguage(CStr(ws.Range(CELL_CONSTRAINTS_LANGUAGE).Value2)) Then
+        ws.Range(CELL_CONSTRAINTS_LANGUAGE).Value2 = globalLanguage
     End If
-
-    EventHistory_SetShowInfo Settings_InfoIsEnabled(ws)
-    EventHistory_ApplyLanguage Settings_ModuleLanguage(ws, MODULE_EVENT)
-    WBS_ApplyLanguage Settings_ModuleLanguage(ws, MODULE_WBS)
-    Gantt_ApplyLanguage Settings_ModuleLanguage(ws, MODULE_GANTT)
-    SCurve_ApplyLanguage Settings_ModuleLanguage(ws, MODULE_SCURVE)
-    Dashboard_ApplyLanguage Settings_ModuleLanguage(ws, MODULE_DASHBOARD)
-
-    Settings_RefreshVisuals ws
-
-SafeExit:
+    ws.Range("X1").Value2 = SETTINGS_STORAGE_VERSION
+    ws.Columns("X:Y").Hidden = True
 
 End Sub
 
@@ -153,13 +184,12 @@ Public Sub Settings_ToggleInfoMessages()
     Dim newValue As Boolean
 
     Set ws = Settings_EnsureSheet()
-    Settings_InitializeStorage ws
 
     newValue = Not Settings_InfoIsEnabled(ws)
     ws.Range(CELL_INFO_ENABLED).value = newValue
 
     EventHistory_SetShowInfo newValue
-    EventHistory_ApplyLanguage Settings_ModuleLanguage(ws, MODULE_EVENT)
+    Refresh_EventHistory_View
     Settings_RefreshVisuals ws
 
 End Sub
@@ -174,15 +204,13 @@ Public Sub Settings_ToggleGlobalLanguage()
     Dim languageCode As String
 
     Set ws = Settings_EnsureSheet()
-    Settings_InitializeStorage ws
 
     languageCode = Settings_OppositeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).value))
-    ws.Range(CELL_GLOBAL_LANGUAGE).value = languageCode
 
     If Settings_GlobalIsActivated(ws) Then
-        Settings_WriteAllModuleLanguages ws, languageCode
-        Settings_ApplyLanguages
+        Settings_ApplyGlobalLanguageTransaction ws, languageCode, True
     Else
+        ws.Range(CELL_GLOBAL_LANGUAGE).value = languageCode
         Settings_RefreshVisuals ws
     End If
 
@@ -198,16 +226,13 @@ Public Sub Settings_ToggleGlobalActivated()
     Dim newValue As Boolean
 
     Set ws = Settings_EnsureSheet()
-    Settings_InitializeStorage ws
 
     newValue = Not Settings_GlobalIsActivated(ws)
-    ws.Range(CELL_GLOBAL_ACTIVATED).value = newValue
-
     If newValue Then
-        Settings_WriteAllModuleLanguages ws, _
-            Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).value), "EN")
-        Settings_ApplyLanguages
+        Settings_ApplyGlobalLanguageTransaction ws, _
+            Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).value), "EN"), False
     Else
+        ws.Range(CELL_GLOBAL_ACTIVATED).value = False
         Settings_RefreshVisuals ws
     End If
 
@@ -246,11 +271,86 @@ Public Sub Settings_ToggleWBSLanguage()
 End Sub
 
 '------------------------------------------------------------------------------
+' FR: Bascule la langue de l'owner Constraints depuis SETTINGS.
+' EN: Toggles the Constraints owner language from SETTINGS.
+'------------------------------------------------------------------------------
+Public Sub Settings_ToggleConstraintsLanguage()
+    Settings_ToggleModuleLanguage MODULE_CONSTRAINTS
+End Sub
+
+'------------------------------------------------------------------------------
 ' FR: Met a jour Settings Toggle Event History Language dans le contexte settings and language.
 ' EN: Updates Settings Toggle Event History Language in the settings and language context.
 '------------------------------------------------------------------------------
 Public Sub Settings_ToggleEventHistoryLanguage()
     Settings_ToggleModuleLanguage MODULE_EVENT
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Retourne le mode d'affichage des dates sans modifier le stockage.
+' EN: Returns the date display mode without mutating persisted storage.
+'------------------------------------------------------------------------------
+Public Function Settings_GetDateDisplayMode() As String
+
+    Dim ws As Worksheet
+
+    On Error GoTo UseFallback
+    Set ws = ThisWorkbook.Worksheets(SETTINGS_SHEET)
+    Settings_GetDateDisplayMode = _
+        Settings_NormalizeDateDisplayMode(CStr(ws.Range(CELL_DATE_DISPLAY_MODE).Value2))
+    Exit Function
+
+UseFallback:
+    Settings_GetDateDisplayMode = DATE_MODE_DMY
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne le format invariant de date visible selectionne.
+' EN: Returns the selected invariant visible date format.
+'------------------------------------------------------------------------------
+Public Function Settings_GetDateNumberFormat() As String
+    Settings_GetDateNumberFormat = _
+        Settings_DateNumberFormatForMode(Settings_GetDateDisplayMode())
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne le format invariant de date et heure visible selectionne.
+' EN: Returns the selected invariant visible date-time format.
+'------------------------------------------------------------------------------
+Public Function Settings_GetDateTimeNumberFormat() As String
+    Settings_GetDateTimeNumberFormat = _
+        Settings_DateTimeNumberFormatForMode(Settings_GetDateDisplayMode())
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne le format invariant compact utilise par les axes visibles.
+' EN: Returns the invariant compact format used by visible date axes.
+'------------------------------------------------------------------------------
+Public Function Settings_GetCompactDateNumberFormat() As String
+    Settings_GetCompactDateNumberFormat = _
+        Settings_CompactDateNumberFormatForMode(Settings_GetDateDisplayMode())
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Fait avancer le selecteur partage DMY, MDY, ISO.
+' EN: Advances the shared DMY, MDY, ISO selector.
+'------------------------------------------------------------------------------
+Public Sub Settings_ToggleDateDisplayMode()
+
+    Dim requestedMode As String
+
+    Select Case Settings_GetDateDisplayMode()
+        Case DATE_MODE_DMY
+            requestedMode = DATE_MODE_MDY
+        Case DATE_MODE_MDY
+            requestedMode = DATE_MODE_ISO
+        Case Else
+            requestedMode = DATE_MODE_DMY
+    End Select
+
+    Settings_ApplyDateDisplayMode requestedMode
+
 End Sub
 
 '------------------------------------------------------------------------------
@@ -262,19 +362,72 @@ Private Sub Settings_ToggleModuleLanguage(ByVal moduleKey As String)
     Dim ws As Worksheet
     Dim languageCode As String
     Dim storageCell As String
+    Dim oldLanguage As String
+    Dim oldStoredValue As Variant
+    Dim oldGlobalActivated As Variant
+    Dim oldEvents As Boolean
+    Dim oldScreenUpdating As Boolean
+    Dim headerSnapshot As Object
+    Dim stateCaptured As Boolean
+    Dim applyStarted As Boolean
+    Dim headersApplied As Boolean
+    Dim errorDescription As String
 
     Set ws = Settings_EnsureSheet()
-    Settings_InitializeStorage ws
 
     storageCell = Settings_ModuleStorageCell(moduleKey)
     If storageCell = "" Then Exit Sub
 
-    languageCode = Settings_OppositeLanguage(CStr(ws.Range(storageCell).value))
-    ws.Range(storageCell).value = languageCode
-    ws.Range(CELL_GLOBAL_ACTIVATED).value = False
+    oldLanguage = Settings_ModuleLanguage(ws, moduleKey)
+    oldStoredValue = ws.Range(storageCell).Value2
+    oldGlobalActivated = ws.Range(CELL_GLOBAL_ACTIVATED).Value2
+    languageCode = Settings_OppositeLanguage(oldLanguage)
+    If languageCode = oldLanguage Then Exit Sub
 
+    On Error GoTo ApplyFailed
+    Settings_PreflightLanguageOwner moduleKey
+    VisibleHeaders_PreflightOwner moduleKey, languageCode
+    Set headerSnapshot = VisibleHeaders_CaptureOwnerSnapshot(moduleKey)
+
+    oldEvents = Application.EnableEvents
+    oldScreenUpdating = Application.ScreenUpdating
+    stateCaptured = True
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    VisibleHeaders_ApplyOwnerFromSnapshot headerSnapshot, moduleKey, languageCode
+    headersApplied = True
+    applyStarted = True
     Settings_ApplySingleModule moduleKey, languageCode
+    ws.Range(storageCell).Value2 = languageCode
+    ws.Range(CELL_GLOBAL_ACTIVATED).Value2 = False
     Settings_RefreshVisuals ws
+
+CleanExit:
+    Schema_ClearPhysicalHeaderLanguageOverrides
+    If stateCaptured Then
+        Application.ScreenUpdating = oldScreenUpdating
+        Application.EnableEvents = oldEvents
+    End If
+    Exit Sub
+
+ApplyFailed:
+    errorDescription = Err.Source & ": " & Err.Description
+    On Error Resume Next
+    If headersApplied Then VisibleHeaders_RestoreSnapshot headerSnapshot
+    If applyStarted Then Settings_ApplySingleModule moduleKey, oldLanguage
+    ws.Range(storageCell).Value2 = oldStoredValue
+    ws.Range(CELL_GLOBAL_ACTIVATED).Value2 = oldGlobalActivated
+    Settings_RefreshVisuals ws
+    Schema_ClearPhysicalHeaderLanguageOverrides
+    On Error GoTo 0
+    If stateCaptured Then
+        Application.ScreenUpdating = oldScreenUpdating
+        Application.EnableEvents = oldEvents
+    End If
+    CalcBridge_ShowSingleConsoleMessage "STOP", _
+        "La langue " & moduleKey & " n'a pas ete modifiee. " & errorDescription, _
+        "The " & moduleKey & " language was not changed. " & errorDescription
 
 End Sub
 
@@ -295,8 +448,147 @@ Private Sub Settings_ApplySingleModule( _
             SCurve_ApplyLanguage languageCode
         Case MODULE_WBS
             WBS_ApplyLanguage languageCode
+        Case MODULE_CONSTRAINTS
+            Constraints_ApplyLanguage languageCode
         Case MODULE_EVENT
             EventHistory_ApplyLanguage languageCode
+    End Select
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Applique les six owners comme une transaction unique depuis GLOBAL.
+' EN: Applies all six owners as one transaction from GLOBAL.
+'------------------------------------------------------------------------------
+Private Sub Settings_ApplyGlobalLanguageTransaction( _
+    ByVal ws As Worksheet, _
+    ByVal requestedLanguage As String, _
+    ByVal persistGlobalLanguage As Boolean)
+
+    Dim ownerKeys As Variant
+    Dim oldLanguages(0 To 5) As String
+    Dim oldStoredValues(0 To 5) As Variant
+    Dim oldGlobalLanguage As Variant
+    Dim oldGlobalActivated As Variant
+    Dim oldEvents As Boolean
+    Dim oldScreenUpdating As Boolean
+    Dim headerSnapshot As Object
+    Dim targetLanguage As String
+    Dim stateCaptured As Boolean
+    Dim applyStarted As Boolean
+    Dim headersApplied As Boolean
+    Dim failedOwner As String
+    Dim errorDescription As String
+    Dim i As Long
+
+    targetLanguage = Settings_NormalizeLanguage(requestedLanguage, "EN")
+    ownerKeys = Settings_LanguageOwnerKeys()
+
+    On Error GoTo ApplyFailed
+
+    oldGlobalLanguage = ws.Range(CELL_GLOBAL_LANGUAGE).Value2
+    oldGlobalActivated = ws.Range(CELL_GLOBAL_ACTIVATED).Value2
+
+    For i = LBound(ownerKeys) To UBound(ownerKeys)
+        oldLanguages(i) = Settings_ModuleLanguage(ws, CStr(ownerKeys(i)))
+        oldStoredValues(i) = ws.Range(Settings_ModuleStorageCell(CStr(ownerKeys(i)))).Value2
+    Next i
+
+    For i = LBound(ownerKeys) To UBound(ownerKeys)
+        Settings_PreflightLanguageOwner CStr(ownerKeys(i))
+    Next i
+    VisibleHeaders_PreflightAll targetLanguage
+    Set headerSnapshot = VisibleHeaders_CaptureAllSnapshot()
+
+    oldEvents = Application.EnableEvents
+    oldScreenUpdating = Application.ScreenUpdating
+    stateCaptured = True
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    VisibleHeaders_ApplyAllFromSnapshot headerSnapshot, targetLanguage
+    headersApplied = True
+    applyStarted = True
+    For i = LBound(ownerKeys) To UBound(ownerKeys)
+        failedOwner = CStr(ownerKeys(i))
+        Settings_ApplySingleModule failedOwner, targetLanguage
+    Next i
+
+    For i = LBound(ownerKeys) To UBound(ownerKeys)
+        ws.Range(Settings_ModuleStorageCell(CStr(ownerKeys(i)))).Value2 = targetLanguage
+    Next i
+    If persistGlobalLanguage Then ws.Range(CELL_GLOBAL_LANGUAGE).Value2 = targetLanguage
+    ws.Range(CELL_GLOBAL_ACTIVATED).Value2 = True
+    Settings_RefreshVisuals ws
+
+CleanExit:
+    Schema_ClearPhysicalHeaderLanguageOverrides
+    If stateCaptured Then
+        Application.ScreenUpdating = oldScreenUpdating
+        Application.EnableEvents = oldEvents
+    End If
+    Exit Sub
+
+ApplyFailed:
+    errorDescription = Err.Source & ": " & Err.Description
+    On Error Resume Next
+    If headersApplied Then VisibleHeaders_RestoreSnapshot headerSnapshot
+    If applyStarted Then
+        For i = UBound(ownerKeys) To LBound(ownerKeys) Step -1
+            Settings_ApplySingleModule CStr(ownerKeys(i)), oldLanguages(i)
+        Next i
+    End If
+    For i = LBound(ownerKeys) To UBound(ownerKeys)
+        ws.Range(Settings_ModuleStorageCell(CStr(ownerKeys(i)))).Value2 = oldStoredValues(i)
+    Next i
+    ws.Range(CELL_GLOBAL_LANGUAGE).Value2 = oldGlobalLanguage
+    ws.Range(CELL_GLOBAL_ACTIVATED).Value2 = oldGlobalActivated
+    Settings_RefreshVisuals ws
+    Schema_ClearPhysicalHeaderLanguageOverrides
+    On Error GoTo 0
+    If stateCaptured Then
+        Application.ScreenUpdating = oldScreenUpdating
+        Application.EnableEvents = oldEvents
+    End If
+    CalcBridge_ShowSingleConsoleMessage "STOP", _
+        "Le changement GLOBAL a echoue sur " & failedOwner & ". " & errorDescription, _
+        "The GLOBAL language change failed on " & failedOwner & ". " & errorDescription
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Retourne les owners dans l'ordre transactionnel canonique.
+' EN: Returns owners in canonical transaction order.
+'------------------------------------------------------------------------------
+Private Function Settings_LanguageOwnerKeys() As Variant
+    Settings_LanguageOwnerKeys = Array( _
+        MODULE_DASHBOARD, MODULE_GANTT, MODULE_SCURVE, _
+        MODULE_WBS, MODULE_CONSTRAINTS, MODULE_EVENT)
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Valide les ressources minimales d'un owner avant toute mutation.
+' EN: Validates an owner's minimum resources before any mutation.
+'------------------------------------------------------------------------------
+Private Sub Settings_PreflightLanguageOwner(ByVal moduleKey As String)
+
+    Select Case UCase$(Trim$(moduleKey))
+        Case MODULE_DASHBOARD
+            Settings_RequireWorksheet "DASHBOARD"
+        Case MODULE_GANTT
+            Settings_RequireWorksheet "GANTT"
+        Case MODULE_SCURVE
+            Settings_RequireWorksheet "SCURVE"
+        Case MODULE_WBS
+            Settings_RequireTable "WBS", "tbl_WBS"
+        Case MODULE_CONSTRAINTS
+            Settings_RequireTable "CONSTRAINTS", "tbl_CONSTRAINTS"
+        Case MODULE_EVENT
+            Settings_RequireTable "EVENT_HISTORY", "tbl_EVENT_HISTORY"
+            Settings_RequireTable "EVENT_ACK", "tbl_EVENT_ACK"
+        Case Else
+            Err.Raise vbObjectError + 5210, "Settings_PreflightLanguageOwner", _
+                "Unknown language owner: " & moduleKey
     End Select
 
 End Sub
@@ -335,42 +627,6 @@ Private Function Settings_EnsureSheet() As Worksheet
 End Function
 
 '------------------------------------------------------------------------------
-' FR: Met a jour Settings Initialize Storage dans le contexte settings and language.
-' EN: Updates Settings Initialize Storage in the settings and language context.
-'------------------------------------------------------------------------------
-Private Sub Settings_InitializeStorage(ByVal ws As Worksheet)
-
-    Dim globalLanguage As String
-
-    If ws Is Nothing Then Exit Sub
-
-    globalLanguage = Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).value), "EN")
-    ws.Range(CELL_GLOBAL_LANGUAGE).value = globalLanguage
-
-    If Trim$(CStr(ws.Range(CELL_GLOBAL_ACTIVATED).value)) = "" Then
-        ws.Range(CELL_GLOBAL_ACTIVATED).value = True
-    Else
-        ws.Range(CELL_GLOBAL_ACTIVATED).value = Settings_GlobalIsActivated(ws)
-    End If
-
-    Settings_EnsureLanguageCell ws, CELL_DASHBOARD_LANGUAGE, globalLanguage
-    Settings_EnsureLanguageCell ws, CELL_GANTT_LANGUAGE, globalLanguage
-    Settings_EnsureLanguageCell ws, CELL_SCURVE_LANGUAGE, globalLanguage
-    Settings_EnsureLanguageCell ws, CELL_WBS_LANGUAGE, globalLanguage
-    Settings_EnsureLanguageCell ws, CELL_EVENT_LANGUAGE, globalLanguage
-
-    If Trim$(CStr(ws.Range(CELL_INFO_ENABLED).value)) = "" Then
-        ws.Range(CELL_INFO_ENABLED).value = EventHistory_CurrentShowInfo()
-    Else
-        ws.Range(CELL_INFO_ENABLED).value = Settings_InfoIsEnabled(ws)
-    End If
-
-    ws.Range("X1").value = "SETTINGS_STORAGE_V1"
-    ws.Columns("X:Y").Hidden = True
-
-End Sub
-
-'------------------------------------------------------------------------------
 ' FR: Met a jour Settings Info Is Enabled dans le contexte settings and language.
 ' EN: Updates Settings Info Is Enabled in the settings and language context.
 '------------------------------------------------------------------------------
@@ -393,20 +649,6 @@ Private Function Settings_InfoIsEnabled(ByVal ws As Worksheet) As Boolean
          textValue = "Y" Or textValue = "1" Or textValue = "ON")
 
 End Function
-
-'------------------------------------------------------------------------------
-' FR: Met a jour Settings Ensure Language Cell dans le contexte settings and language.
-' EN: Updates Settings Ensure Language Cell in the settings and language context.
-'------------------------------------------------------------------------------
-Private Sub Settings_EnsureLanguageCell( _
-    ByVal ws As Worksheet, _
-    ByVal cellAddress As String, _
-    ByVal fallbackLanguage As String)
-
-    ws.Range(cellAddress).value = _
-        Settings_NormalizeLanguage(CStr(ws.Range(cellAddress).value), fallbackLanguage)
-
-End Sub
 
 '------------------------------------------------------------------------------
 ' FR: Met a jour Settings Global Is Activated dans le contexte settings and language.
@@ -456,6 +698,17 @@ Private Function Settings_NormalizeLanguage( _
 End Function
 
 '------------------------------------------------------------------------------
+' FR: Indique si un code de langue persiste est reconnu.
+' EN: Returns whether a persisted language code is recognized.
+'------------------------------------------------------------------------------
+Private Function Settings_IsRecognizedLanguage(ByVal languageCode As String) As Boolean
+    Select Case UCase$(Trim$(languageCode))
+        Case "FR", "EN"
+            Settings_IsRecognizedLanguage = True
+    End Select
+End Function
+
+'------------------------------------------------------------------------------
 ' FR: Met a jour Settings Opposite Language dans le contexte settings and language.
 ' EN: Updates Settings Opposite Language in the settings and language context.
 '------------------------------------------------------------------------------
@@ -484,6 +737,8 @@ Private Function Settings_ModuleStorageCell(ByVal moduleKey As String) As String
             Settings_ModuleStorageCell = CELL_SCURVE_LANGUAGE
         Case MODULE_WBS
             Settings_ModuleStorageCell = CELL_WBS_LANGUAGE
+        Case MODULE_CONSTRAINTS
+            Settings_ModuleStorageCell = CELL_CONSTRAINTS_LANGUAGE
         Case MODULE_EVENT
             Settings_ModuleStorageCell = CELL_EVENT_LANGUAGE
     End Select
@@ -505,27 +760,12 @@ Private Function Settings_ModuleLanguage( _
         Settings_ModuleLanguage = "EN"
     Else
         Settings_ModuleLanguage = _
-            Settings_NormalizeLanguage(CStr(ws.Range(cellAddress).value), "EN")
+            Settings_NormalizeLanguage( _
+                CStr(ws.Range(cellAddress).value), _
+                Settings_NormalizeLanguage(CStr(ws.Range(CELL_GLOBAL_LANGUAGE).Value2), "EN"))
     End If
 
 End Function
-
-'------------------------------------------------------------------------------
-' FR: Met a jour Settings Write All Module Languages dans le contexte settings and language.
-' EN: Updates Settings Write All Module Languages in the settings and language context.
-'------------------------------------------------------------------------------
-Private Sub Settings_WriteAllModuleLanguages( _
-    ByVal ws As Worksheet, _
-    ByVal languageCode As String)
-
-    languageCode = Settings_NormalizeLanguage(languageCode, "EN")
-    ws.Range(CELL_DASHBOARD_LANGUAGE).value = languageCode
-    ws.Range(CELL_GANTT_LANGUAGE).value = languageCode
-    ws.Range(CELL_SCURVE_LANGUAGE).value = languageCode
-    ws.Range(CELL_WBS_LANGUAGE).value = languageCode
-    ws.Range(CELL_EVENT_LANGUAGE).value = languageCode
-
-End Sub
 
 '------------------------------------------------------------------------------
 ' FR: Met a jour Settings Build Layout dans le contexte settings and language.
@@ -534,8 +774,18 @@ End Sub
 Private Sub Settings_BuildLayout(ByVal ws As Worksheet)
 
     Dim previousSheet As Object
+    Dim dateTitle As Shape
     Dim panelLeft As Double
     Dim panelTop As Double
+    Dim settingsToggleCenterX As Double
+    Dim horizontalScale As Double
+    Dim dateTrackWidth As Double
+    Dim dateTrackHeight As Double
+    Dim dateKnobSize As Double
+    Dim dateLabelGap As Double
+    Dim dateTrackLeft As Double
+    Dim dateTrackTop As Double
+    Dim dateLabelLeft As Double
 
     If ws Is Nothing Then Exit Sub
 
@@ -548,8 +798,19 @@ Private Sub Settings_BuildLayout(ByVal ws As Worksheet)
 
     panelLeft = ws.Range("B4").Left
     panelTop = ws.Range("B4").Top
+    settingsToggleCenterX = panelLeft + 28 + 310 + (SETTINGS_TRACK_WIDTH / 2)
+    horizontalScale = SETTINGS_TRACK_WIDTH / GANTT_REFERENCE_TRACK_WIDTH
+    dateTrackWidth = GANTT_THREE_POSITION_TRACK_WIDTH * horizontalScale
+    dateTrackHeight = GANTT_REFERENCE_TRACK_HEIGHT * _
+        (SETTINGS_TRACK_HEIGHT / GANTT_REFERENCE_TRACK_HEIGHT)
+    dateKnobSize = GANTT_REFERENCE_KNOB_SIZE * _
+        (SETTINGS_KNOB_SIZE / GANTT_REFERENCE_KNOB_SIZE)
+    dateLabelGap = GANTT_REFERENCE_LABEL_GAP * horizontalScale
+    dateTrackLeft = settingsToggleCenterX - (dateTrackWidth / 2)
+    dateTrackTop = panelTop + 388 + ((20 - dateTrackHeight) / 2)
+    dateLabelLeft = dateTrackLeft - dateLabelGap - DATE_CONTROL_LABEL_WIDTH
 
-    Settings_AddPanel ws, "SET_PANEL_LANGUAGE", panelLeft, panelTop, 610, 350, RGB(255, 255, 255), RGB(214, 220, 228)
+    Settings_AddPanel ws, "SET_PANEL_LANGUAGE", panelLeft, panelTop, 610, 444, RGB(255, 255, 255), RGB(214, 220, 228)
     Settings_AddCenteredTitle ws, "SET_TITLE_LANGUAGE", Settings_L(ws, "Langue", "Language"), panelLeft + 20, panelTop + 16, 570, 28, 15
 
     Settings_AddLanguageSwitch ws, "GLOBAL", "GLOBAL", panelLeft + 28, panelTop + 64, _
@@ -564,14 +825,28 @@ Private Sub Settings_BuildLayout(ByVal ws As Worksheet)
         Settings_ModuleLanguage(ws, MODULE_SCURVE), "Settings_ToggleSCurveLanguage", False
     Settings_AddLanguageSwitch ws, MODULE_WBS, "WBS", panelLeft + 28, panelTop + 250, _
         Settings_ModuleLanguage(ws, MODULE_WBS), "Settings_ToggleWBSLanguage", False
-    Settings_AddLanguageSwitch ws, MODULE_EVENT, "Messages & Event History", panelLeft + 28, panelTop + 294, _
+    Settings_AddLanguageSwitch ws, MODULE_CONSTRAINTS, _
+        Settings_L(ws, "Contraintes", "Constraints"), panelLeft + 28, panelTop + 294, _
+        Settings_ModuleLanguage(ws, MODULE_CONSTRAINTS), "Settings_ToggleConstraintsLanguage", False
+    Settings_AddLanguageSwitch ws, MODULE_EVENT, "Messages & Event History", panelLeft + 28, panelTop + 338, _
         Settings_ModuleLanguage(ws, MODULE_EVENT), "Settings_ToggleEventHistoryLanguage", False
-    Settings_AddInfoSwitch ws, panelLeft + 430, panelTop + 294, Settings_InfoIsEnabled(ws)
+    Settings_AddInfoSwitch ws, panelLeft + 430, panelTop + 338, Settings_InfoIsEnabled(ws)
+
+    Set dateTitle = Settings_AddTextShape(ws, "SET_DATE_FORMAT_TITLE", _
+        Settings_L(ws, "Format des dates", "Date format"), _
+        panelLeft + 28, panelTop + 388, 150, 20, msoAlignLeft, 10.5, True)
+    ThreePositionControl_Ensure ws, _
+        DATE_CONTROL_LABEL_NAME, DATE_CONTROL_BG_NAME, DATE_CONTROL_KNOB_NAME, _
+        dateLabelLeft, panelTop + 388, DATE_CONTROL_LABEL_WIDTH, "DMY / MDY / ISO", _
+        dateTrackLeft, dateTrackTop, dateTrackWidth, dateTrackHeight, dateKnobSize, _
+        "Settings_ToggleDateDisplayMode", xlFreeFloating
+    ThreePositionControl_Refresh ws, DATE_CONTROL_BG_NAME, DATE_CONTROL_KNOB_NAME, _
+        Settings_DateDisplayPosition(Settings_GetDateDisplayMode())
 
     Settings_AddPanel ws, "SET_PANEL_RESET", panelLeft + 634, panelTop, 300, 226, RGB(255, 255, 255), RGB(214, 220, 228)
     Settings_AddCenteredTitle ws, "SET_TITLE_RESET", Settings_L(ws, "R" & ChrW$(&HE9) & "initialisation", "Reset"), panelLeft + 654, panelTop + 16, 260, 28, 14
     Settings_AddCommandButton ws, "SET_BTN_CLEAR_HISTORY", Settings_L(ws, "Nettoyer historique", "Clear History"), "ClearPlanningEventHistory", panelLeft + 674, panelTop + 52, 220, 34, RGB(68, 114, 196), RGB(255, 255, 255)
-    Settings_AddCommandButton ws, "SET_BTN_CLEAR_ACK", Settings_L(ws, "Nettoyer les messages acquités", "Clear Acknowledged"), "ClearPlanningWarningAcknowledgements", panelLeft + 674, panelTop + 92, 220, 34, RGB(68, 114, 196), RGB(255, 255, 255)
+    Settings_AddCommandButton ws, "SET_BTN_CLEAR_ACK", Settings_L(ws, "Nettoyer les messages acquitÃ©s", "Clear Acknowledged"), "ClearPlanningWarningAcknowledgements", panelLeft + 674, panelTop + 92, 220, 34, RGB(68, 114, 196), RGB(255, 255, 255)
     Settings_AddCommandButton ws, "SET_BTN_CLEAN_DASHBOARD", Settings_L(ws, "Nettoyer Dashboard", "Clean Dashboard"), "Reset_Dashboard", panelLeft + 674, panelTop + 132, 220, 34, RGB(68, 114, 196), RGB(255, 255, 255)
     Settings_AddCommandButton ws, "SET_BTN_RESET_PLANNING", Settings_L(ws, "R" & ChrW$(&HE9) & "initialiser planning", "Reset Planning"), "Reset_Planning", panelLeft + 674, panelTop + 172, 220, 34, RGB(192, 120, 0), RGB(255, 255, 255)
 
@@ -940,7 +1215,9 @@ Private Sub Settings_NormalizeAllToggleLabels(ByVal ws As Worksheet)
 
     If ws Is Nothing Then Exit Sub
 
-    keys = Array("GLOBAL", MODULE_DASHBOARD, MODULE_GANTT, MODULE_SCURVE, MODULE_WBS, MODULE_EVENT)
+    keys = Array( _
+        "GLOBAL", MODULE_DASHBOARD, MODULE_GANTT, MODULE_SCURVE, _
+        MODULE_WBS, MODULE_CONSTRAINTS, MODULE_EVENT)
 
     For Each keyName In keys
         Set leftShape = Nothing
@@ -1100,8 +1377,11 @@ Private Sub Settings_RefreshVisuals(ByVal ws As Worksheet)
     Settings_RefreshSwitch ws, MODULE_GANTT, Settings_ModuleLanguage(ws, MODULE_GANTT)
     Settings_RefreshSwitch ws, MODULE_SCURVE, Settings_ModuleLanguage(ws, MODULE_SCURVE)
     Settings_RefreshSwitch ws, MODULE_WBS, Settings_ModuleLanguage(ws, MODULE_WBS)
+    Settings_RefreshSwitch ws, MODULE_CONSTRAINTS, Settings_ModuleLanguage(ws, MODULE_CONSTRAINTS)
     Settings_RefreshSwitch ws, MODULE_EVENT, Settings_ModuleLanguage(ws, MODULE_EVENT)
     Settings_RefreshInfoSwitch ws, Settings_InfoIsEnabled(ws)
+    ThreePositionControl_Refresh ws, DATE_CONTROL_BG_NAME, DATE_CONTROL_KNOB_NAME, _
+        Settings_DateDisplayPosition(Settings_GetDateDisplayMode())
     Settings_NormalizeAllToggleLabels ws
     Settings_RefreshTitles ws
     Settings_RefreshCommandCaptions ws
@@ -1122,6 +1402,9 @@ Private Sub Settings_RefreshTitles(ByVal ws As Worksheet)
 
     ws.Range("B1").value = Settings_L(ws, "Options", "Settings")
     Settings_SetShapeText ws, "SET_TITLE_LANGUAGE", Settings_L(ws, "Langue", "Language")
+    Settings_SetShapeText ws, "SET_LANG_CONSTRAINTS_LABEL", _
+        Settings_L(ws, "Contraintes", "Constraints")
+    Settings_SetShapeText ws, "SET_DATE_FORMAT_TITLE", Settings_L(ws, "Format des dates", "Date format")
     Settings_SetShapeText ws, "SET_TITLE_RESET", Settings_L(ws, "R" & ChrW$(&HE9) & "initialisation", "Reset")
     Settings_SetShapeText ws, "SET_TITLE_DANGER", Settings_L(ws, "Zone de danger", "Danger Zone")
 
@@ -1136,7 +1419,7 @@ Private Sub Settings_RefreshCommandCaptions(ByVal ws As Worksheet)
     If ws Is Nothing Then Exit Sub
 
     Settings_SetShapeText ws, "SET_BTN_CLEAR_HISTORY", Settings_L(ws, "Nettoyer historique", "Clear History")
-    Settings_SetShapeText ws, "SET_BTN_CLEAR_ACK", Settings_L(ws, "Nettoyer les messages acquités", "Clear Acknowledged")
+    Settings_SetShapeText ws, "SET_BTN_CLEAR_ACK", Settings_L(ws, "Nettoyer les messages acquitÃ©s", "Clear Acknowledged")
     Settings_SetShapeText ws, "SET_BTN_CLEAN_DASHBOARD", Settings_L(ws, "Nettoyer Dashboard", "Clean Dashboard")
     Settings_SetShapeText ws, "SET_BTN_RESET_PLANNING", Settings_L(ws, "R" & ChrW$(&HE9) & "initialiser planning", "Reset Planning")
     Settings_SetShapeText ws, "SET_BTN_FULL_RESET", Settings_L(ws, "R" & ChrW$(&HE9) & "initialisation compl" & ChrW$(&HE8) & "te", "Full Reset")
@@ -1214,4 +1497,338 @@ End Function
 '------------------------------------------------------------------------------
 Private Function Settings_ActivatedLabel() As String
     Settings_ActivatedLabel = "Activated / Activ" & ChrW$(&HE9)
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Applique transactionnellement un nouveau format visible aux surfaces produit.
+' EN: Transactionally applies a new visible format to product-facing surfaces.
+'------------------------------------------------------------------------------
+Public Sub Settings_ApplyDateDisplayMode(ByVal requestedMode As String)
+
+    Dim ws As Worksheet
+    Dim oldMode As String
+    Dim normalizedRequested As String
+    Dim oldStoredValue As Variant
+    Dim oldEvents As Boolean
+    Dim oldScreenUpdating As Boolean
+    Dim stateCaptured As Boolean
+    Dim formattingStarted As Boolean
+    Dim errorDescription As String
+
+    If Not Settings_IsValidDateDisplayMode(requestedMode) Then
+        CalcBridge_ShowSingleConsoleMessage "STOP", _
+            "Mode de format de date inconnu : " & requestedMode, _
+            "Unknown date display mode: " & requestedMode
+        Exit Sub
+    End If
+
+    normalizedRequested = Settings_NormalizeDateDisplayMode(requestedMode)
+    oldMode = Settings_GetDateDisplayMode()
+    If normalizedRequested = oldMode Then Exit Sub
+
+    On Error GoTo ApplyFailed
+
+    Set ws = ThisWorkbook.Worksheets(SETTINGS_SHEET)
+    oldStoredValue = ws.Range(CELL_DATE_DISPLAY_MODE).Value2
+    Settings_PreflightDateDisplaySurfaces
+
+    oldEvents = Application.EnableEvents
+    oldScreenUpdating = Application.ScreenUpdating
+    stateCaptured = True
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    formattingStarted = True
+    Settings_ApplyDateDisplayFormatsForMode normalizedRequested
+    ws.Range(CELL_DATE_DISPLAY_MODE).Value2 = normalizedRequested
+    ThreePositionControl_Refresh ws, DATE_CONTROL_BG_NAME, DATE_CONTROL_KNOB_NAME, _
+        Settings_DateDisplayPosition(normalizedRequested)
+
+CleanExit:
+    If stateCaptured Then
+        Application.ScreenUpdating = oldScreenUpdating
+        Application.EnableEvents = oldEvents
+    End If
+    Exit Sub
+
+ApplyFailed:
+    errorDescription = Err.Description
+    On Error Resume Next
+    If formattingStarted Then Settings_ApplyDateDisplayFormatsForMode oldMode
+    If Not ws Is Nothing Then
+        ws.Range(CELL_DATE_DISPLAY_MODE).Value2 = oldStoredValue
+        ThreePositionControl_Refresh ws, DATE_CONTROL_BG_NAME, DATE_CONTROL_KNOB_NAME, _
+            Settings_DateDisplayPosition(oldMode)
+    End If
+    On Error GoTo 0
+    If stateCaptured Then
+        Application.ScreenUpdating = oldScreenUpdating
+        Application.EnableEvents = oldEvents
+    End If
+    CalcBridge_ShowSingleConsoleMessage "STOP", _
+        "Le format des dates n'a pas ete modifie. " & errorDescription, _
+        "The date format was not changed. " & errorDescription
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Valide toutes les surfaces obligatoires avant la premiere ecriture de format.
+' EN: Validates every required surface before the first format write.
+'------------------------------------------------------------------------------
+Private Sub Settings_PreflightDateDisplaySurfaces()
+
+    Dim tbl As ListObject
+    Dim scurveTbl As ListObject
+    Dim ch As Chart
+
+    Set tbl = Settings_RequireTable("WBS", "tbl_WBS")
+    Settings_RequireColumns tbl, VTS_TABLE_WBS, Array( _
+        VTS_COL_BASELINE_START, VTS_COL_BASELINE_FINISH, VTS_COL_ACTUAL_START, VTS_COL_ACTUAL_FINISH, _
+        VTS_COL_FORECAST_START, VTS_COL_FORECAST_FINISH, _
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH)
+
+    Settings_RequireWorksheet "GANTT"
+
+    Set scurveTbl = Settings_RequireTable("SCURVE", "tbl_SCURVE")
+    Settings_RequireColumns scurveTbl, VTS_TABLE_SCURVE, Array(VTS_COL_DATE)
+    Set ch = Settings_RequireVisibleDateChart( _
+        "SCURVE", "cht_SCurve", scurveTbl, VTS_TABLE_SCURVE, VTS_COL_DATE)
+
+    Set tbl = Settings_RequireTable("CONSTRAINTS", "tbl_CONSTRAINTS")
+    Settings_RequireColumns tbl, VTS_TABLE_CONSTRAINTS, Array( _
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH, VTS_COL_START_CONSTRAINT_DATE, _
+        VTS_COL_FINISH_CONSTRAINT_DATE, VTS_COL_DEADLINE)
+
+    Set tbl = Settings_RequireTable("EVENT_HISTORY", "tbl_EVENT_HISTORY")
+    Settings_RequireColumns tbl, VTS_TABLE_EVENT_HISTORY, Array(VTS_COL_DATE)
+    Set tbl = Settings_RequireTable("EVENT_ACK", "tbl_EVENT_ACK")
+    Settings_RequireColumns tbl, VTS_TABLE_EVENT_ACK, Array(VTS_COL_ACKNOWLEDGED_AT)
+
+    Set ch = Settings_RequireVisibleDateChart( _
+        "DASHBOARD", "cht_Dashboard_SCurve", scurveTbl, VTS_TABLE_SCURVE, VTS_COL_DATE)
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Applique uniquement NumberFormat aux surfaces visibles contractuelles.
+' EN: Applies only NumberFormat to the contracted visible surfaces.
+'------------------------------------------------------------------------------
+Private Sub Settings_ApplyDateDisplayFormatsForMode(ByVal modeValue As String)
+
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim scurveTbl As ListObject
+    Dim ch As Chart
+    Dim dateFormat As String
+    Dim dateTimeFormat As String
+    Dim compactFormat As String
+    Dim lastRow As Long
+
+    dateFormat = Settings_DateNumberFormatForMode(modeValue)
+    dateTimeFormat = Settings_DateTimeNumberFormatForMode(modeValue)
+    compactFormat = Settings_CompactDateNumberFormatForMode(modeValue)
+
+    Set tbl = Settings_RequireTable("WBS", "tbl_WBS")
+    Settings_ApplyTableColumnFormats tbl, VTS_TABLE_WBS, Array( _
+        VTS_COL_BASELINE_START, VTS_COL_BASELINE_FINISH, VTS_COL_ACTUAL_START, VTS_COL_ACTUAL_FINISH, _
+        VTS_COL_FORECAST_START, VTS_COL_FORECAST_FINISH, _
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH), _
+        dateFormat
+
+    Set ws = Settings_RequireWorksheet("GANTT")
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    If lastRow < 5 Then lastRow = 5
+    ws.Range(ws.Cells(5, 3), ws.Cells(lastRow, 6)).NumberFormat = dateFormat
+
+    Set scurveTbl = Settings_RequireTable("SCURVE", "tbl_SCURVE")
+    Settings_ApplyTableColumnFormats scurveTbl, VTS_TABLE_SCURVE, Array(VTS_COL_DATE), dateFormat
+    Set ch = Settings_RequireVisibleDateChart( _
+        "SCURVE", "cht_SCurve", scurveTbl, VTS_TABLE_SCURVE, VTS_COL_DATE)
+    If Not ch Is Nothing Then ch.Axes(xlCategory).TickLabels.NumberFormat = dateFormat
+
+    Set tbl = Settings_RequireTable("CONSTRAINTS", "tbl_CONSTRAINTS")
+    Settings_ApplyTableColumnFormats tbl, VTS_TABLE_CONSTRAINTS, Array( _
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH, VTS_COL_START_CONSTRAINT_DATE, _
+        VTS_COL_FINISH_CONSTRAINT_DATE, VTS_COL_DEADLINE), dateFormat
+
+    Set tbl = Settings_RequireTable("EVENT_HISTORY", "tbl_EVENT_HISTORY")
+    Settings_ApplyTableColumnFormats tbl, VTS_TABLE_EVENT_HISTORY, Array(VTS_COL_DATE), dateFormat
+    Set tbl = Settings_RequireTable("EVENT_ACK", "tbl_EVENT_ACK")
+    Settings_ApplyTableColumnFormats tbl, VTS_TABLE_EVENT_ACK, Array(VTS_COL_ACKNOWLEDGED_AT), dateTimeFormat
+
+    Set ch = Settings_RequireVisibleDateChart( _
+        "DASHBOARD", "cht_Dashboard_SCurve", scurveTbl, VTS_TABLE_SCURVE, VTS_COL_DATE)
+    If Not ch Is Nothing Then ch.Axes(xlCategory).TickLabels.NumberFormat = compactFormat
+
+End Sub
+
+Private Sub Settings_ApplyTableColumnFormats( _
+    ByVal tbl As ListObject, _
+    ByVal tableKey As String, _
+    ByVal columnKeys As Variant, _
+    ByVal numberFormat As String)
+
+    Dim columnKey As Variant
+
+    For Each columnKey In columnKeys
+        SchemaListColumn(tbl, tableKey, CStr(columnKey)).Range.NumberFormat = numberFormat
+    Next columnKey
+
+End Sub
+
+Private Function Settings_RequireWorksheet(ByVal sheetName As String) As Worksheet
+
+    On Error Resume Next
+    Set Settings_RequireWorksheet = ThisWorkbook.Worksheets(sheetName)
+    On Error GoTo 0
+    If Settings_RequireWorksheet Is Nothing Then
+        Err.Raise vbObjectError + 5281, "Settings_RequireWorksheet", _
+            "Required worksheet is missing: " & sheetName
+    End If
+
+End Function
+
+Private Function Settings_RequireTable( _
+    ByVal sheetName As String, _
+    ByVal tableName As String) As ListObject
+
+    Dim ws As Worksheet
+
+    Set ws = Settings_RequireWorksheet(sheetName)
+    On Error Resume Next
+    Set Settings_RequireTable = ws.ListObjects(tableName)
+    On Error GoTo 0
+    If Settings_RequireTable Is Nothing Then
+        Err.Raise vbObjectError + 5282, "Settings_RequireTable", _
+            "Required table is missing: " & sheetName & "!" & tableName
+    End If
+
+End Function
+
+Private Function Settings_RequireVisibleDateChart( _
+    ByVal sheetName As String, _
+    ByVal chartName As String, _
+    ByVal dateTable As ListObject, _
+    ByVal tableKey As String, _
+    ByVal dateColumnKey As String) As Chart
+
+    Dim ws As Worksheet
+    Dim dateRange As Range
+
+    Set ws = Settings_RequireWorksheet(sheetName)
+    On Error Resume Next
+    Set Settings_RequireVisibleDateChart = ws.ChartObjects(chartName).Chart
+    On Error GoTo 0
+
+    If Settings_RequireVisibleDateChart Is Nothing Then
+        Set dateRange = SchemaListColumn(dateTable, tableKey, dateColumnKey).DataBodyRange
+        If Not dateRange Is Nothing Then
+            If Application.Count(dateRange) > 0 Then
+                Err.Raise vbObjectError + 5283, "Settings_RequireVisibleDateChart", _
+                    "Required chart is missing: " & sheetName & "!" & chartName
+            End If
+        End If
+        Exit Function
+    End If
+
+    If Not Settings_RequireVisibleDateChart.HasAxis(xlCategory) Then
+        Err.Raise vbObjectError + 5284, "Settings_RequireVisibleDateChart", _
+            "Required date axis is missing: " & sheetName & "!" & chartName
+    End If
+
+End Function
+
+Private Sub Settings_RequireColumns( _
+    ByVal tbl As ListObject, _
+    ByVal tableKey As String, _
+    ByVal columnKeys As Variant)
+
+    Dim columnKey As Variant
+    Dim listColumn As ListColumn
+
+    For Each columnKey In columnKeys
+        Set listColumn = Nothing
+        On Error Resume Next
+        Set listColumn = SchemaListColumn(tbl, tableKey, CStr(columnKey))
+        On Error GoTo 0
+        If listColumn Is Nothing Then
+            Err.Raise vbObjectError + 5285, "Settings_RequireColumns", _
+                "Required column is missing: " & tbl.Name & "[" & CStr(columnKey) & "]"
+        End If
+    Next columnKey
+
+End Sub
+
+Private Function Settings_IsValidDateDisplayMode(ByVal modeValue As String) As Boolean
+
+    Select Case UCase$(Trim$(modeValue))
+        Case DATE_MODE_DMY, DATE_MODE_MDY, DATE_MODE_ISO
+            Settings_IsValidDateDisplayMode = True
+    End Select
+
+End Function
+
+Private Function Settings_NormalizeDateDisplayMode(ByVal modeValue As String) As String
+
+    Select Case UCase$(Trim$(modeValue))
+        Case DATE_MODE_MDY
+            Settings_NormalizeDateDisplayMode = DATE_MODE_MDY
+        Case DATE_MODE_ISO
+            Settings_NormalizeDateDisplayMode = DATE_MODE_ISO
+        Case Else
+            Settings_NormalizeDateDisplayMode = DATE_MODE_DMY
+    End Select
+
+End Function
+
+Private Function Settings_DateNumberFormatForMode(ByVal modeValue As String) As String
+
+    Select Case Settings_NormalizeDateDisplayMode(modeValue)
+        Case DATE_MODE_MDY
+            Settings_DateNumberFormatForMode = DATE_FORMAT_MDY
+        Case DATE_MODE_ISO
+            Settings_DateNumberFormatForMode = DATE_FORMAT_ISO
+        Case Else
+            Settings_DateNumberFormatForMode = DATE_FORMAT_DMY
+    End Select
+
+End Function
+
+Private Function Settings_DateTimeNumberFormatForMode(ByVal modeValue As String) As String
+
+    Select Case Settings_NormalizeDateDisplayMode(modeValue)
+        Case DATE_MODE_MDY
+            Settings_DateTimeNumberFormatForMode = DATETIME_FORMAT_MDY
+        Case DATE_MODE_ISO
+            Settings_DateTimeNumberFormatForMode = DATETIME_FORMAT_ISO
+        Case Else
+            Settings_DateTimeNumberFormatForMode = DATETIME_FORMAT_DMY
+    End Select
+
+End Function
+
+Private Function Settings_CompactDateNumberFormatForMode(ByVal modeValue As String) As String
+
+    Select Case Settings_NormalizeDateDisplayMode(modeValue)
+        Case DATE_MODE_MDY
+            Settings_CompactDateNumberFormatForMode = DATE_COMPACT_FORMAT_MDY
+        Case DATE_MODE_ISO
+            Settings_CompactDateNumberFormatForMode = DATE_COMPACT_FORMAT_ISO
+        Case Else
+            Settings_CompactDateNumberFormatForMode = DATE_COMPACT_FORMAT_DMY
+    End Select
+
+End Function
+
+Private Function Settings_DateDisplayPosition(ByVal modeValue As String) As Long
+
+    Select Case Settings_NormalizeDateDisplayMode(modeValue)
+        Case DATE_MODE_MDY
+            Settings_DateDisplayPosition = 1
+        Case DATE_MODE_ISO
+            Settings_DateDisplayPosition = 2
+        Case Else
+            Settings_DateDisplayPosition = 0
+    End Select
+
 End Function

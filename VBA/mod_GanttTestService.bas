@@ -163,23 +163,23 @@ Public Sub GanttTestService_RunTestEngine( _
 
     For r = 1 To rowCount
 
-        idVal = Trim$(CStr(dataWBS(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(CStr(dataWBS(r, mapWBS("WBS"))))
-        taskTypeVal = Trim$(CStr(dataWBS(r, mapWBS("Task Type"))))
+        idVal = Trim$(CStr(dataWBS(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(CStr(dataWBS(r, mapWBS(VTS_COL_WBS))))
+        taskTypeVal = Trim$(CStr(dataWBS(r, mapWBS(VTS_COL_TASK_TYPE))))
 
         testRow = testRow + 1
 
-        baseStart = GetCellValue(dataWBS(r, mapWBS("Calculated Start")))
-        baseFinish = GetCellValue(dataWBS(r, mapWBS("Calculated Finish")))
-        baseDuration = GetCellValue(dataWBS(r, mapWBS("Calculated Duration")))
-        baseProgress = GetCellValue(dataWBS(r, mapWBS("% Progress")))
+        baseStart = GetCellValue(dataWBS(r, mapWBS(VTS_COL_CALCULATED_START)))
+        baseFinish = GetCellValue(dataWBS(r, mapWBS(VTS_COL_CALCULATED_FINISH)))
+        baseDuration = GetCellValue(dataWBS(r, mapWBS(VTS_COL_CALCULATED_DURATION)))
+        baseProgress = GetCellValue(dataWBS(r, mapWBS(VTS_COL_PROGRESS_PERCENT)))
 
-        baselineStart = GetCellValue(dataWBS(r, mapWBS("Baseline Start")))
-        baselineDuration = GetCellValue(dataWBS(r, mapWBS("Baseline Duration")))
-        actualStart = GetCellValue(dataWBS(r, mapWBS("Actual Start")))
-        actualFinish = GetCellValue(dataWBS(r, mapWBS("Actual Finish")))
-        forecastStart = GetCellValue(dataWBS(r, mapWBS("Forecast Start")))
-        forecastFinish = GetCellValue(dataWBS(r, mapWBS("Forecast Finish")))
+        baselineStart = GetCellValue(dataWBS(r, mapWBS(VTS_COL_BASELINE_START)))
+        baselineDuration = GetCellValue(dataWBS(r, mapWBS(VTS_COL_BASELINE_DURATION)))
+        actualStart = GetCellValue(dataWBS(r, mapWBS(VTS_COL_ACTUAL_START)))
+        actualFinish = GetCellValue(dataWBS(r, mapWBS(VTS_COL_ACTUAL_FINISH)))
+        forecastStart = GetCellValue(dataWBS(r, mapWBS(VTS_COL_FORECAST_START)))
+        forecastFinish = GetCellValue(dataWBS(r, mapWBS(VTS_COL_FORECAST_FINISH)))
 
         If mapCalcDriving.Exists(idVal) Then
             drivingLogic = CStr(mapCalcDriving(idVal))
@@ -227,7 +227,7 @@ Public Sub GanttTestService_RunTestEngine( _
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "ID")) = idVal
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "WBS")) = wbsVal
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Task Type")) = taskTypeVal
-        outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Cal")) = NormalizeCalendarType(dataWBS(r, mapWBS("Cal")))
+        outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Cal")) = NormalizeCalendarType(dataWBS(r, mapWBS(VTS_COL_CAL)))
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Is Summary")) = IIf(isSummary, "YES", "NO")
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Parent ID")) = GetParentIdFromWBS(wbsVal, wbsToId)
 

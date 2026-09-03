@@ -193,8 +193,8 @@ Private Sub DrawGanttShapeRow( _
     Dim isMilestone As Boolean
 
     ganttRow = FIRST_TASK_ROW + r - 1
-    wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
-    idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+    wbs = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
+    idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
 
     If IsObject(affectedIds) Then
         If Not affectedIds.Exists(idVal) Then Exit Sub
@@ -208,8 +208,8 @@ Private Sub DrawGanttShapeRow( _
     renderFinishVal = GetRenderFinishForCurrentScale(rawFinishVal)
 
     isParent = hasChildren.Exists(wbs)
-    isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
-    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r)
+    isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r, VTS_COL_TASK_TYPE)
+    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r, VTS_COL_TASK_TYPE)
 
     If Not ShouldRenderTaskInCurrentView(isParent, renderStartVal, renderFinishVal) Then Exit Sub
     If Not HasValue(rawStartVal) Or Not HasValue(rawFinishVal) Then Exit Sub
@@ -231,7 +231,7 @@ Private Sub DrawGanttShapeRow( _
 
     If isParent Then
         DrawSummaryBar ws, ganttRow, projectStart, rawStartVal, rawFinishVal, isCritical, totalDays, _
-            "SUM_" & CStr(r), Trim$(CStr(dataArr(r, mapWBS("Task Name")))), hasDelta, _
+            "SUM_" & CStr(r), Trim$(CStr(dataArr(r, mapWBS(VTS_COL_TASK_NAME)))), hasDelta, _
             ParentIsCompleteFromMap(wbs, parentCompleteMap)
     ElseIf isMilestone Then
         DrawMilestone ws, ganttRow, projectStart, rawStartVal, progressVal, isCritical, totalDays, "MS_" & CStr(r), hasDelta
@@ -289,9 +289,9 @@ Public Function GanttRenderer_ApplyAnalyticsStyleOnlyRecords( _
         r = CLng(key)
         If r < 1 Or r > UBound(dataArr, 1) Then GoTo NextPreflightRow
 
-        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
         isParent = hasChildren.Exists(wbs)
-        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
+        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r, VTS_COL_TASK_TYPE)
 
         If isParent Then
             shapeName = "SUM_" & CStr(r) & "_H"
@@ -360,10 +360,10 @@ NextPreflightRow:
         r = CLng(key)
         If r < 1 Or r > UBound(dataArr, 1) Then GoTo NextRow
 
-        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+        wbs = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
+        idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
         isParent = hasChildren.Exists(wbs)
-        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
+        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r, VTS_COL_TASK_TYPE)
         isCritical = ShouldHighlightGanttAnalyticsPath(dataArr, mapWBS, r, idVal, testById, isTestMode)
 
         rawStartVal = GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode)
@@ -559,17 +559,17 @@ End Sub
 ' EN: Returns the Gantt Analytics Path Column Name value without exposing a mutator for source state.
 '------------------------------------------------------------------------------
 
-Private Function GetGanttAnalyticsPathColumnName() As String
+Private Function GetGanttAnalyticsPathColumnKey() As String
 
     EnsureGanttViewInitialized
 
     Select Case GetGanttAnalyticsPathMode()
         Case GANTT_ANALYTICS_PATH_CP
-            GetGanttAnalyticsPathColumnName = "Critical Path"
+            GetGanttAnalyticsPathColumnKey = VTS_COL_CRITICAL_PATH
         Case GANTT_ANALYTICS_PATH_LP
-            GetGanttAnalyticsPathColumnName = "Longest Path"
+            GetGanttAnalyticsPathColumnKey = VTS_COL_LONGEST_PATH
         Case Else
-            GetGanttAnalyticsPathColumnName = vbNullString
+            GetGanttAnalyticsPathColumnKey = vbNullString
     End Select
 
 End Function
@@ -586,24 +586,24 @@ Public Function ShouldHighlightGanttAnalyticsPath( _
     Optional ByVal testById As Object = Nothing, _
     Optional ByVal isTestMode As Boolean = False) As Boolean
 
-    Dim pathColumnName As String
+    Dim pathColumnKey As String
     Dim pathValue As String
 
-    pathColumnName = GetGanttAnalyticsPathColumnName()
-    If Len(pathColumnName) = 0 Then Exit Function
+    pathColumnKey = GetGanttAnalyticsPathColumnKey()
+    If Len(pathColumnKey) = 0 Then Exit Function
 
     If isTestMode And GanttLive_IsTestAnalyticsProjectionActive() Then
-        pathValue = UCase$(Trim$(GanttLive_GetDisplayAnalyticsPath(idVal, testById, True, pathColumnName)))
+        pathValue = UCase$(Trim$(GanttLive_GetDisplayAnalyticsPath(idVal, testById, True, pathColumnKey)))
     Else
         If mapWBS Is Nothing Then Exit Function
-        If Not mapWBS.Exists(pathColumnName) Then Exit Function
-        pathValue = UCase$(Trim$(CStr(dataArr(dataRow, mapWBS(pathColumnName)))))
+        If Not mapWBS.Exists(pathColumnKey) Then Exit Function
+        pathValue = UCase$(Trim$(CStr(dataArr(dataRow, mapWBS(pathColumnKey)))))
     End If
 
-    Select Case pathColumnName
-        Case "Critical Path"
+    Select Case pathColumnKey
+        Case VTS_COL_CRITICAL_PATH
             ShouldHighlightGanttAnalyticsPath = (pathValue = "CRITICAL")
-        Case "Longest Path"
+        Case VTS_COL_LONGEST_PATH
             ShouldHighlightGanttAnalyticsPath = (pathValue = "LONGEST")
     End Select
 
@@ -615,7 +615,7 @@ End Function
 '------------------------------------------------------------------------------
 Private Function IsGanttAnalyticsPathHighlightEnabled() As Boolean
 
-    IsGanttAnalyticsPathHighlightEnabled = (Len(GetGanttAnalyticsPathColumnName()) > 0)
+    IsGanttAnalyticsPathHighlightEnabled = (Len(GetGanttAnalyticsPathColumnKey()) > 0)
 
 End Function
 
@@ -666,7 +666,7 @@ Private Function IsParentWBS(ByVal wbs As String, ByRef dataArr As Variant, ByVa
     prefix = wbs & "."
 
     For i = 1 To UBound(dataArr, 1)
-        otherWBS = NormalizeWBS(CStr(dataArr(i, mapWBS("WBS"))))
+        otherWBS = NormalizeWBS(CStr(dataArr(i, mapWBS(VTS_COL_WBS))))
         If Left$(otherWBS, Len(prefix)) = prefix Then
             IsParentWBS = True
             Exit Function
@@ -758,10 +758,10 @@ Public Function GanttHierarchy_BuildLeafCompletionByAncestorForRows( _
         For Each key In rowKeys
             i = CLng(key)
             If i >= 1 And i <= rowCount Then
-                wbsVal = NormalizeWBS(CStr(dataArr(i, mapWBS("WBS"))))
+                wbsVal = NormalizeWBS(CStr(dataArr(i, mapWBS(VTS_COL_WBS))))
                 If wbsVal <> "" Then
-                    If HasValue(dataArr(i, mapWBS("% Progress"))) Then
-                        parentMap(wbsVal) = (CDbl(dataArr(i, mapWBS("% Progress"))) >= 1)
+                    If HasValue(dataArr(i, mapWBS(VTS_COL_PROGRESS_PERCENT))) Then
+                        parentMap(wbsVal) = (CDbl(dataArr(i, mapWBS(VTS_COL_PROGRESS_PERCENT))) >= 1)
                     Else
                         parentMap(wbsVal) = False
                     End If
@@ -776,16 +776,16 @@ Public Function GanttHierarchy_BuildLeafCompletionByAncestorForRows( _
     End If
 
     For i = 1 To rowCount
-        wbsVal = NormalizeWBS(CStr(dataArr(i, mapWBS("WBS"))))
+        wbsVal = NormalizeWBS(CStr(dataArr(i, mapWBS(VTS_COL_WBS))))
         If wbsVal = "" Then GoTo NextI
 
         nextWbs = vbNullString
-        If i < rowCount Then nextWbs = NormalizeWBS(CStr(dataArr(i + 1, mapWBS("WBS"))))
+        If i < rowCount Then nextWbs = NormalizeWBS(CStr(dataArr(i + 1, mapWBS(VTS_COL_WBS))))
         isLeaf = Not (nextWbs <> "" And Left$(nextWbs, Len(wbsVal) + 1) = wbsVal & ".")
         If Not isLeaf Then GoTo NextI
 
-        If HasValue(dataArr(i, mapWBS("% Progress"))) Then
-            progressVal = CDbl(dataArr(i, mapWBS("% Progress")))
+        If HasValue(dataArr(i, mapWBS(VTS_COL_PROGRESS_PERCENT))) Then
+            progressVal = CDbl(dataArr(i, mapWBS(VTS_COL_PROGRESS_PERCENT)))
         Else
             progressVal = 0
         End If
@@ -915,7 +915,7 @@ Public Function GanttHierarchy_BuildDirectParentPresenceFromWbs( _
     Set d = CreateObject("Scripting.Dictionary")
 
     For r = 1 To UBound(dataArr, 1)
-        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
         parentWbs = GetParentWBS(wbsVal)
 
         If parentWbs <> "" Then
@@ -946,7 +946,7 @@ Public Function GanttRenderer_BuildWbsRowById( _
     Set d = CreateObject("Scripting.Dictionary")
 
     For r = 1 To UBound(dataArr, 1)
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
         If idVal <> "" Then
             d(idVal) = FIRST_TASK_ROW + r - 1
         End If

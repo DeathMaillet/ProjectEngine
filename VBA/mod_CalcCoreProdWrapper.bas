@@ -18,13 +18,13 @@ Option Explicit
 '===============================================================================
 
 
-' Wrapper PROD pilote du nouveau cœur.
+' Wrapper PROD pilote du nouveau cÅ“ur.
 '
-' Cette version corrige le point critique identifié :
+' Cette version corrige le point critique identifiÃ© :
 ' - expansion des liens summary -> leaf
-' - production d'un réseau final leaf -> leaf
+' - production d'un rÃ©seau final leaf -> leaf
 '
-' Le core reste inchangé.
+' Le core reste inchangÃ©.
 '=====================================================
 
 '------------------------------------------------------------------------------
@@ -87,8 +87,8 @@ Public Sub Run_Calc_Core_PROD_Pilot()
 
     CalcCoreProd_ShowConsoleMessage _
         "INFO", _
-        "Pilot core terminé." & vbCrLf & _
-        "-> résultats écrits dans tbl_CALC", _
+        "Pilot core terminÃ©." & vbCrLf & _
+        "-> rÃ©sultats Ã©crits dans tbl_CALC", _
         "Pilot core completed." & vbCrLf & _
         "-> results written to tbl_CALC"
 
@@ -151,8 +151,8 @@ Public Sub FillCalcParentAndSummaryFromWBS( _
     RequireColumn mapCalc, "ParentID", "tbl_CALC"
     RequireColumn mapCalc, "IsSummary", "tbl_CALC"
 
-    RequireColumn mapWBS, "ID", "tbl_WBS"
-    RequireColumn mapWBS, "WBS", "tbl_WBS"
+    RequireColumn mapWBS, VTS_COL_ID, "tbl_WBS"
+    RequireColumn mapWBS, VTS_COL_WBS, "tbl_WBS"
 
     arrCalc = tblCalc.DataBodyRange.value
     arrWBS = tblWBS.DataBodyRange.value
@@ -168,14 +168,14 @@ Public Sub FillCalcParentAndSummaryFromWBS( _
     Next r
 
     For r = 1 To UBound(arrWBS, 1)
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(arrWBS(r, mapWBS("WBS")))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(arrWBS(r, mapWBS(VTS_COL_WBS)))
         If idVal <> "" And wbsVal <> "" Then idByWBS(wbsVal) = idVal
     Next r
 
     For r = 1 To UBound(arrWBS, 1)
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(arrWBS(r, mapWBS("WBS")))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(arrWBS(r, mapWBS(VTS_COL_WBS)))
 
         If idVal <> "" And wbsVal <> "" Then
             parentWbs = GetParentWBS(wbsVal)

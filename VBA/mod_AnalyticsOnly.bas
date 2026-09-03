@@ -24,8 +24,8 @@ Option Explicit
 '
 ' Objectif :
 ' - Le toggle visible est dans WBS, au-dessus des colonnes analytics.
-' - L'état ON/OFF est conservé en mémoire VBA uniquement.
-' - CALC!AB1 n'est plus utilisé comme backend state.
+' - L'Ã©tat ON/OFF est conservÃ© en mÃ©moire VBA uniquement.
+' - CALC!AB1 n'est plus utilisÃ© comme backend state.
 '
 ' Comportement :
 '
@@ -35,7 +35,7 @@ Option Explicit
 ' - vide aussi les colonnes analytics dans CALC si elles existent.
 '
 ' ON :
-' - recalcule uniquement les analytics sur l'état courant de CALC ;
+' - recalcule uniquement les analytics sur l'Ã©tat courant de CALC ;
 ' - pousse les analytics vers WBS ;
 ' - ne relance pas le core planning complet.
 '
@@ -49,7 +49,7 @@ Option Explicit
 ' - shp_WBS_Analytics_BG
 ' - shp_WBS_Analytics_Knob
 '
-' Colonnes analytics concernées :
+' Colonnes analytics concernÃ©es :
 ' - Critical Path
 ' - Critical Path REX
 ' - Total Float
@@ -255,7 +255,7 @@ Public Sub Run_Analytics_Only( _
     If tblCalc.DataBodyRange Is Nothing Then
         CalcBridge_AddConsoleMessage localConsole, "WARNING", _
             BiMsg( _
-                "Analytics non recalculées : tbl_CALC est vide.", _
+                "Analytics non recalculÃ©es : tbl_CALC est vide.", _
                 "Analytics not recalculated: tbl_CALC is empty.")
 
         If showLocalConsole Then CalcBridge_ShowPlanningConsole localConsole
@@ -335,11 +335,12 @@ Public Sub Clear_Analytics_Outputs(Optional ByVal consoleMessages As Collection 
 
     If Not tblCalc.DataBodyRange Is Nothing Then
         For i = LBound(analyticsCols) To UBound(analyticsCols)
-            ClearListColumnIfExists tblCalc, CStr(analyticsCols(i))
+            ClearListColumnIfExists tblCalc, _
+                SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, CStr(analyticsCols(i)))
         Next i
     End If
 
-    allowedFields = analyticsCols
+    allowedFields = AnalyticsVisibleColumnTitles(analyticsCols)
 
     If Not tblWBS.DataBodyRange Is Nothing Then
 
@@ -347,7 +348,7 @@ Public Sub Clear_Analytics_Outputs(Optional ByVal consoleMessages As Collection 
             "Clear_Analytics_Outputs", allowedFields)
 
         For i = LBound(analyticsCols) To UBound(analyticsCols)
-            ClearListColumnIfExists tblWBS, CStr(analyticsCols(i))
+            ClearVisibleWBSColumn tblWBS, CStr(analyticsCols(i))
         Next i
 
         CloseAuthorizedWBSWriteScope writeScopeToken
@@ -423,8 +424,8 @@ End Function
 Private Function AnalyticsOnly_NegativeFloatWarningMessage() As String
 
     AnalyticsOnly_NegativeFloatWarningMessage = BiMsg( _
-        "Float négatif détecté dans le planning actuel" & vbCrLf & _
-        "-> vérifier la logique, les dates, les lags ou les prévisions", _
+        "Float nÃ©gatif dÃ©tectÃ© dans le planning actuel" & vbCrLf & _
+        "-> vÃ©rifier la logique, les dates, les lags ou les prÃ©visions", _
         "Negative float detected in the current schedule" & vbCrLf & _
         "-> check logic, dates, lags or forecasts")
 
@@ -438,17 +439,36 @@ End Function
 Private Function AnalyticsColumnNames() As Variant
 
     AnalyticsColumnNames = Array( _
-        "Critical Path", _
-        "Longest Path", _
-        "Critical Path REX", _
-        "Total Float", _
-        "Free Float", _
-        "Total Float REX", _
-        "Free Float REX", _
-        "Deadline Float" _
+        VTS_COL_CRITICAL_PATH, _
+        VTS_COL_LONGEST_PATH, _
+        VTS_COL_CRITICAL_PATH_REX, _
+        VTS_COL_TOTAL_FLOAT, _
+        VTS_COL_FREE_FLOAT, _
+        VTS_COL_TOTAL_FLOAT_REX, _
+        VTS_COL_FREE_FLOAT_REX, _
+        VTS_COL_DEADLINE_FLOAT _
     )
 
 End Function
+
+Private Function AnalyticsVisibleColumnTitles(ByVal columnKeys As Variant) As Variant
+    Dim titles() As Variant
+    Dim i As Long
+
+    ReDim titles(LBound(columnKeys) To UBound(columnKeys))
+    For i = LBound(columnKeys) To UBound(columnKeys)
+        titles(i) = SchemaCurrentColumnTitle(VTS_TABLE_WBS, CStr(columnKeys(i)))
+    Next i
+
+    AnalyticsVisibleColumnTitles = titles
+End Function
+
+Private Sub ClearVisibleWBSColumn(ByVal tblWBS As ListObject, ByVal columnKey As String)
+    Dim col As ListColumn
+
+    Set col = SchemaListColumn(tblWBS, VTS_TABLE_WBS, columnKey)
+    If Not col.DataBodyRange Is Nothing Then col.DataBodyRange.ClearContents
+End Sub
 
 '------------------------------------------------------------------------------
 ' FR: Vide ou reinitialise List Column If Exists.

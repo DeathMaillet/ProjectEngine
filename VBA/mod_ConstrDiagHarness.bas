@@ -52,10 +52,10 @@ Public Function ConstraintsDiagnosticsHarness_Smoke( _
 
     Set messages = New Collection
     Set mapConstraints = CreateObject("Scripting.Dictionary")
-    mapConstraints("ID") = 1
-    mapConstraints("WBS") = 2
-    mapConstraints("Task Name") = 3
-    mapConstraints("Active") = 4
+    mapConstraints(VTS_COL_ID) = 1
+    mapConstraints(VTS_COL_WBS) = 2
+    mapConstraints(VTS_COL_TASK_NAME) = 3
+    mapConstraints(VTS_COL_ACTIVE) = 4
 
     arrConstraints(1, 1) = "CSTOP-001"
     arrConstraints(1, 2) = "31.9.1"

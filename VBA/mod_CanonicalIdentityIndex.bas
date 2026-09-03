@@ -27,8 +27,8 @@ Private Const CANONICAL_CALC_SHEET As String = "CALC"
 Private Const CANONICAL_CALC_TABLE As String = "tbl_CALC"
 
 '------------------------------------------------------------------------------
-' FR: Construit une map immuable nom de colonne vers index pour une table.
-' EN: Builds an immutable column-name-to-index map for a table.
+' FR: Construit une map immuable de cle de schema (tables visibles) ou de nom (tables techniques) vers index.
+' EN: Builds an immutable schema-key (visible tables) or physical-name (technical tables) to index map.
 '------------------------------------------------------------------------------
 Public Function CanonicalIdentity_BuildColumnMap(ByVal tbl As ListObject) As Object
 
@@ -37,11 +37,15 @@ Public Function CanonicalIdentity_BuildColumnMap(ByVal tbl As ListObject) As Obj
     Dim i As Long
 
     Set perfScope = Profiler_BeginScope("CanonicalIdentity_BuildColumnMap", "Excel Metadata")
-    Set values = CreateObject("Scripting.Dictionary")
+    If SchemaIsVisibleTable(tbl.Name) Then
+        Set values = SchemaBuildColumnKeyMap(tbl, tbl.Name)
+    Else
+        Set values = CreateObject("Scripting.Dictionary")
 
-    For i = 1 To tbl.ListColumns.Count
-        values(tbl.ListColumns(i).Name) = i
-    Next i
+        For i = 1 To tbl.ListColumns.Count
+            values(tbl.ListColumns(i).Name) = i
+        Next i
+    End If
 
     Set CanonicalIdentity_BuildColumnMap = CanonicalIdentity_Freeze(values)
 
@@ -69,8 +73,8 @@ Public Function CanonicalIdentity_BuildWbsToIdMap( _
         arr = tblWBS.DataBodyRange.value
 
         For r = 1 To UBound(arr, 1)
-            wbsVal = NormalizeWBS(CStr(arr(r, mapWBS("WBS"))))
-            idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
+            wbsVal = NormalizeWBS(CStr(arr(r, mapWBS(VTS_COL_WBS))))
+            idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
 
             If wbsVal <> "" And idVal <> "" Then
                 values(wbsVal) = idVal
@@ -221,8 +225,8 @@ Public Function CanonicalIdentity_GetWbsByIdMap() As Object
         arr = tblWBS.DataBodyRange.value
 
         For r = 1 To UBound(arr, 1)
-            idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
-            If idVal <> "" Then values(idVal) = NormalizeWBS(CStr(arr(r, mapWBS("WBS"))))
+            idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
+            If idVal <> "" Then values(idVal) = NormalizeWBS(CStr(arr(r, mapWBS(VTS_COL_WBS))))
         Next r
     End If
 

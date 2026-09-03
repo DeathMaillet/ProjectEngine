@@ -72,10 +72,13 @@ Private Sub RestoreGanttTestInputs(ByVal ws As Worksheet, ByVal testInputMap As 
     Dim r As Long
     Dim wbsVal As String
     Dim savedVals As Variant
+    Dim dateFormat As String
 
     Set perfScope = Profiler_BeginScope("RestoreGanttTestInputs", "Excel Cell Write")
 
     If testInputMap Is Nothing Then Exit Sub
+
+    dateFormat = Settings_GetDateNumberFormat()
 
     lastRow = GetLastGanttRow(ws)
     If lastRow < FIRST_TASK_ROW Then Exit Sub
@@ -92,8 +95,8 @@ Private Sub RestoreGanttTestInputs(ByVal ws As Worksheet, ByVal testInputMap As 
                 ws.cells(r, COL_TEST_FINISH).value = savedVals(1)
                 ws.cells(r, COL_TEST_PROGRESS).value = savedVals(2)
 
-                ws.cells(r, COL_TEST_START).NumberFormat = "dd/mm/yyyy"
-                ws.cells(r, COL_TEST_FINISH).NumberFormat = "dd/mm/yyyy"
+                ws.cells(r, COL_TEST_START).NumberFormat = dateFormat
+                ws.cells(r, COL_TEST_FINISH).NumberFormat = dateFormat
                 ws.cells(r, COL_TEST_PROGRESS).NumberFormat = "0%"
             End If
         End If
@@ -291,17 +294,20 @@ Public Sub GanttLayout_UpdateAffectedLeftPanelRows( _
     Dim ganttRow As Long
     Dim dataRow As Long
     Dim updatedCount As Long
+    Dim dateFormat As String
 
     If ws Is Nothing Then Exit Sub
     If affectedIds Is Nothing Then Exit Sub
     If rowById Is Nothing Then Exit Sub
+
+    dateFormat = Settings_GetDateNumberFormat()
 
     For Each idVal In affectedIds.keys
         If rowById.Exists(CStr(idVal)) Then
             ganttRow = CLng(rowById(CStr(idVal)))
             dataRow = ganttRow - FIRST_TASK_ROW + 1
             If dataRow >= 1 And dataRow <= UBound(dataArr, 1) Then
-                WriteLeftPanelRow ws, ganttRow, dataArr, dataRow, mapWBS
+                WriteLeftPanelRow ws, ganttRow, dataArr, dataRow, mapWBS, dateFormat
                 ApplyRowStyle ws, ganttRow, dataArr, dataRow, mapWBS, hasChildren, calcDrivingMap
                 updatedCount = updatedCount + 1
             End If
@@ -351,10 +357,12 @@ Public Sub PrepareGanttFullLayout( _
     Dim ganttRow As Long
     Dim r As Long
     Dim applyLeftPanelDefaults As Boolean
+    Dim dateFormat As String
 
     Set perfScope = Profiler_BeginScope("PrepareGanttFullLayout", "Gantt Layout")
 
     applyLeftPanelDefaults = (isNewSheet Or IsGanttSheetLayoutEmpty(wsGantt))
+    dateFormat = Settings_GetDateNumberFormat()
 
     ClearGanttSheetRetainingShapes wsGantt
     SetupStaticLayout wsGantt
@@ -363,7 +371,7 @@ Public Sub PrepareGanttFullLayout( _
 
     ganttRow = FIRST_TASK_ROW
     For r = 1 To rowCount
-        WriteLeftPanelRow wsGantt, ganttRow, dataArr, r, mapWBS
+        WriteLeftPanelRow wsGantt, ganttRow, dataArr, r, mapWBS, dateFormat
         ApplyRowStyle wsGantt, ganttRow, dataArr, r, mapWBS, hasChildren, calcDrivingMap
         ganttRow = ganttRow + 1
     Next r
@@ -674,19 +682,20 @@ Private Sub SetupStaticLayout(ByVal ws As Worksheet)
 
 
     Set perfScope = Profiler_BeginScope("SetupStaticLayout", "Gantt Layout")
+    Gantt_SetLanguage Settings_GetOwnerLanguage("GANTT")
 
-    ws.cells(TITLE_ROW, COL_WBS).value = "GANTT VIEW"
+    ws.cells(TITLE_ROW, COL_WBS).value = Gantt_Text("VUE GANTT", "GANTT VIEW")
 
     ws.Range("A" & HEADER_ROW_2).value = "WBS"
-    ws.Range("B" & HEADER_ROW_2).value = "Task Name"
-    ws.Range("C" & HEADER_ROW_2).value = "Start"
-    ws.Range("D" & HEADER_ROW_2).value = "Finish"
-    ws.Range("E" & HEADER_ROW_2).value = TEST_START_HEADER
-    ws.Range("F" & HEADER_ROW_2).value = TEST_FINISH_HEADER
-    ws.Range("G" & HEADER_ROW_2).value = "Duration"
+    ws.Range("B" & HEADER_ROW_2).value = Gantt_Text("Nom tâche", "Task Name")
+    ws.Range("C" & HEADER_ROW_2).value = Gantt_Text("Début", "Start")
+    ws.Range("D" & HEADER_ROW_2).value = Gantt_Text("Fin", "Finish")
+    ws.Range("E" & HEADER_ROW_2).value = Gantt_Text("Début test", TEST_START_HEADER)
+    ws.Range("F" & HEADER_ROW_2).value = Gantt_Text("Fin test", TEST_FINISH_HEADER)
+    ws.Range("G" & HEADER_ROW_2).value = Gantt_Text("Durée", "Duration")
     ws.Range("H" & HEADER_ROW_2).value = "%"
-    ws.Range("I" & HEADER_ROW_2).value = TEST_PROGRESS_HEADER
-    ws.Range("J" & HEADER_ROW_2).value = "Logic"
+    ws.Range("I" & HEADER_ROW_2).value = Gantt_Text("Test %", TEST_PROGRESS_HEADER)
+    ws.Range("J" & HEADER_ROW_2).value = Gantt_Text("Logique", "Logic")
 
     ws.Range(ws.cells(TITLE_ROW, COL_WBS), ws.cells(TITLE_ROW, COL_LOGIC)).Font.Bold = True
     ws.Range("A" & HEADER_ROW_2 & ":J" & HEADER_ROW_2).Font.Bold = True
@@ -704,8 +713,6 @@ Private Sub SetupStaticLayout(ByVal ws As Worksheet)
 
     ws.Range("A" & HEADER_ROW_2 & ":J" & HEADER_ROW_2).Interior.Color = RGB(217, 217, 217)
     ws.Range("A" & HEADER_ROW_2 & ":J" & HEADER_ROW_2).Borders.LineStyle = xlContinuous
-
-    Gantt_ApplyLanguage
 
 End Sub
 
@@ -1047,7 +1054,13 @@ End Sub
 ' FR: Execute le helper Write Left Panel Row dans le workflow de rendu GANTT.
 ' EN: Runs the Write Left Panel Row helper in the GANTT rendering workflow.
 '------------------------------------------------------------------------------
-Private Sub WriteLeftPanelRow(ByVal ws As Worksheet, ByVal ganttRow As Long, ByRef dataArr As Variant, ByVal dataRow As Long, ByVal mapWBS As Object)
+Private Sub WriteLeftPanelRow( _
+    ByVal ws As Worksheet, _
+    ByVal ganttRow As Long, _
+    ByRef dataArr As Variant, _
+    ByVal dataRow As Long, _
+    ByVal mapWBS As Object, _
+    ByVal dateFormat As String)
 
     Dim perfScope As clsPerfScope
 
@@ -1069,18 +1082,18 @@ Private Sub WriteLeftPanelRow(ByVal ws As Worksheet, ByVal ganttRow As Long, ByR
     ws.rows(ganttRow).rowHeight = GANTT_ROW_HEIGHT_TASK
 
     logicVal = ""
-    If mapWBS.Exists("Driving Logic") Then
-        logicVal = CStr(dataArr(dataRow, mapWBS("Driving Logic")))
+    If mapWBS.Exists(VTS_COL_DRIVING_LOGIC) Then
+        logicVal = CStr(dataArr(dataRow, mapWBS(VTS_COL_DRIVING_LOGIC)))
     End If
 
-    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, dataRow)
+    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, dataRow, VTS_COL_TASK_TYPE)
     preserveTestInputs = GetGanttPreserveTestInputs()
 
     ws.cells(ganttRow, COL_WBS).NumberFormat = "@"
     formatWriteCount = formatWriteCount + 1
 
-    If HasValue(dataArr(dataRow, mapWBS("% Progress"))) Then
-        progressVal = dataArr(dataRow, mapWBS("% Progress"))
+    If HasValue(dataArr(dataRow, mapWBS(VTS_COL_PROGRESS_PERCENT))) Then
+        progressVal = dataArr(dataRow, mapWBS(VTS_COL_PROGRESS_PERCENT))
     Else
         progressVal = 0
     End If
@@ -1091,15 +1104,15 @@ Private Sub WriteLeftPanelRow(ByVal ws As Worksheet, ByVal ganttRow As Long, ByR
 
     If preserveTestInputs Then
         ReDim coreValues(1 To 1, 1 To 4)
-        coreValues(1, 1) = NormalizeWBS(CStr(dataArr(dataRow, mapWBS("WBS"))))
-        coreValues(1, 2) = dataArr(dataRow, mapWBS("Task Name"))
-        coreValues(1, 3) = dataArr(dataRow, mapWBS("Calculated Start"))
-        coreValues(1, 4) = dataArr(dataRow, mapWBS("Calculated Finish"))
+        coreValues(1, 1) = NormalizeWBS(CStr(dataArr(dataRow, mapWBS(VTS_COL_WBS))))
+        coreValues(1, 2) = dataArr(dataRow, mapWBS(VTS_COL_TASK_NAME))
+        coreValues(1, 3) = dataArr(dataRow, mapWBS(VTS_COL_CALCULATED_START))
+        coreValues(1, 4) = dataArr(dataRow, mapWBS(VTS_COL_CALCULATED_FINISH))
         ws.Range(ws.cells(ganttRow, COL_WBS), ws.cells(ganttRow, COL_FINISH)).Value2 = coreValues
         batchWriteCount = batchWriteCount + 1
 
         ReDim durationProgressValues(1 To 1, 1 To 2)
-        durationProgressValues(1, 1) = dataArr(dataRow, mapWBS("Calculated Duration"))
+        durationProgressValues(1, 1) = dataArr(dataRow, mapWBS(VTS_COL_CALCULATED_DURATION))
         durationProgressValues(1, 2) = progressVal
         ws.Range(ws.cells(ganttRow, COL_DURATION), ws.cells(ganttRow, COL_PROGRESS)).Value2 = durationProgressValues
         batchWriteCount = batchWriteCount + 1
@@ -1108,13 +1121,13 @@ Private Sub WriteLeftPanelRow(ByVal ws As Worksheet, ByVal ganttRow As Long, ByR
         batchWriteCount = batchWriteCount + 1
     Else
         ReDim rowValues(1 To 1, 1 To COL_LOGIC)
-        rowValues(1, COL_WBS) = NormalizeWBS(CStr(dataArr(dataRow, mapWBS("WBS"))))
-        rowValues(1, COL_TASK) = dataArr(dataRow, mapWBS("Task Name"))
-        rowValues(1, COL_START) = dataArr(dataRow, mapWBS("Calculated Start"))
-        rowValues(1, COL_FINISH) = dataArr(dataRow, mapWBS("Calculated Finish"))
+        rowValues(1, COL_WBS) = NormalizeWBS(CStr(dataArr(dataRow, mapWBS(VTS_COL_WBS))))
+        rowValues(1, COL_TASK) = dataArr(dataRow, mapWBS(VTS_COL_TASK_NAME))
+        rowValues(1, COL_START) = dataArr(dataRow, mapWBS(VTS_COL_CALCULATED_START))
+        rowValues(1, COL_FINISH) = dataArr(dataRow, mapWBS(VTS_COL_CALCULATED_FINISH))
         rowValues(1, COL_TEST_START) = Empty
         rowValues(1, COL_TEST_FINISH) = Empty
-        rowValues(1, COL_DURATION) = dataArr(dataRow, mapWBS("Calculated Duration"))
+        rowValues(1, COL_DURATION) = dataArr(dataRow, mapWBS(VTS_COL_CALCULATED_DURATION))
         rowValues(1, COL_PROGRESS) = progressVal
         rowValues(1, COL_TEST_PROGRESS) = Empty
         rowValues(1, COL_LOGIC) = logicVal
@@ -1145,7 +1158,8 @@ Private Sub WriteLeftPanelRow(ByVal ws As Worksheet, ByVal ganttRow As Long, ByR
 
     End If
 
-    ws.Range(ws.cells(ganttRow, COL_START), ws.cells(ganttRow, COL_TEST_FINISH)).NumberFormat = "dd/mm/yyyy"
+    ws.Range(ws.cells(ganttRow, COL_START), ws.cells(ganttRow, COL_TEST_FINISH)).NumberFormat = _
+        dateFormat
     ws.Range(ws.cells(ganttRow, COL_PROGRESS), ws.cells(ganttRow, COL_TEST_PROGRESS)).NumberFormat = "0%"
     formatWriteCount = formatWriteCount + 2
 
@@ -1173,24 +1187,24 @@ Private Sub ApplyRowStyle(ByVal ws As Worksheet, ByVal ganttRow As Long, ByRef d
 
     Set perfScope = Profiler_BeginScope("ApplyRowStyle", "Excel Format")
 
-    wbs = NormalizeWBS(CStr(dataArr(dataRow, mapWBS("WBS"))))
+    wbs = NormalizeWBS(CStr(dataArr(dataRow, mapWBS(VTS_COL_WBS))))
     levelCount = WBSLevel(wbs)
-    idVal = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    idVal = Trim$(CStr(dataArr(dataRow, mapWBS(VTS_COL_ID))))
     isLeaf = Not hasChildren.Exists(wbs)
 
     logicVal = ""
-    If mapWBS.Exists("Driving Logic") Then
-        logicVal = CStr(dataArr(dataRow, mapWBS("Driving Logic")))
+    If mapWBS.Exists(VTS_COL_DRIVING_LOGIC) Then
+        logicVal = CStr(dataArr(dataRow, mapWBS(VTS_COL_DRIVING_LOGIC)))
     End If
 
-    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, dataRow)
+    isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, dataRow, VTS_COL_TASK_TYPE)
 
     hasActual = False
-    If mapWBS.Exists("Actual Start") Then
-        If HasValue(dataArr(dataRow, mapWBS("Actual Start"))) Then hasActual = True
+    If mapWBS.Exists(VTS_COL_ACTUAL_START) Then
+        If HasValue(dataArr(dataRow, mapWBS(VTS_COL_ACTUAL_START))) Then hasActual = True
     End If
-    If mapWBS.Exists("Actual Finish") Then
-        If HasValue(dataArr(dataRow, mapWBS("Actual Finish"))) Then hasActual = True
+    If mapWBS.Exists(VTS_COL_ACTUAL_FINISH) Then
+        If HasValue(dataArr(dataRow, mapWBS(VTS_COL_ACTUAL_FINISH))) Then hasActual = True
     End If
 
     ws.cells(ganttRow, COL_TASK).IndentLevel = WorksheetFunction.Min(levelCount - 1, 15)

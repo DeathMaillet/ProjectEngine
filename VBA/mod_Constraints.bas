@@ -22,10 +22,69 @@ Option Explicit
 
 Private Const CONSTRAINTS_SHEET_NAME As String = "CONSTRAINTS"
 Private Const CONSTRAINTS_TABLE_NAME As String = "tbl_CONSTRAINTS"
-Private Const CONSTRAINTS_TOP_LEFT As String = "A2"
+Private Const CONSTRAINTS_TOP_LEFT As String = "A1"
 
 Private Const WBS_SHEET_NAME As String = "WBS"
 Private Const WBS_TABLE_NAME As String = "tbl_WBS"
+
+Private gConstraintsLanguage As String
+
+'------------------------------------------------------------------------------
+' FR: Applique uniquement les textes visibles possedes par Constraints.
+' EN: Applies only user-visible text owned by Constraints.
+'------------------------------------------------------------------------------
+Public Sub Constraints_ApplyLanguage(Optional ByVal languageCode As String = "")
+
+    Dim stepName As String
+
+    On Error GoTo ErrHandler
+
+    stepName = "set runtime language"
+    If Trim$(languageCode) <> "" Then
+        Constraints_SetLanguage languageCode
+    Else
+        Constraints_SetLanguage Settings_GetOwnerLanguage("CONSTRAINTS")
+    End If
+
+    Exit Sub
+
+ErrHandler:
+    Err.Raise Err.Number, "Constraints_ApplyLanguage." & stepName, Err.Description
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Hydrate la langue runtime de Constraints sans ecriture persistante.
+' EN: Hydrates the Constraints runtime language without persistent writes.
+'------------------------------------------------------------------------------
+Public Sub Constraints_SetLanguage(ByVal languageCode As String)
+    Select Case UCase$(Trim$(languageCode))
+        Case "FR"
+            gConstraintsLanguage = "FR"
+        Case Else
+            gConstraintsLanguage = "EN"
+    End Select
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Retourne la langue runtime de Constraints.
+' EN: Returns the Constraints runtime language.
+'------------------------------------------------------------------------------
+Public Function Constraints_CurrentLanguage() As String
+    If UCase$(Trim$(gConstraintsLanguage)) <> "FR" And _
+       UCase$(Trim$(gConstraintsLanguage)) <> "EN" Then
+        gConstraintsLanguage = Settings_GetOwnerLanguage("CONSTRAINTS")
+    End If
+    Constraints_CurrentLanguage = gConstraintsLanguage
+End Function
+
+Private Function Constraints_L(ByVal frText As String, ByVal enText As String) As String
+    If Constraints_CurrentLanguage() = "FR" Then
+        Constraints_L = frText
+    Else
+        Constraints_L = enText
+    End If
+End Function
 
 '------------------------------------------------------------------------------
 ' FR: Traite un changement ou evenement pour Constraints Change.
@@ -44,7 +103,7 @@ Public Sub Handle_Constraints_Change(ByVal ws As Worksheet, ByVal Target As Rang
     Set tbl = ws.ListObjects(CONSTRAINTS_TABLE_NAME)
     If tbl.DataBodyRange Is Nothing Then Exit Sub
 
-    Set rngDeadline = tbl.ListColumns("Deadline").DataBodyRange
+    Set rngDeadline = SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_DEADLINE).DataBodyRange
     Set rngToCheck = Intersect(Target, rngDeadline)
     If rngToCheck Is Nothing Then Exit Sub
 
@@ -116,8 +175,9 @@ Public Sub Import_WBS_To_Constraints()
     Set mapConstraints = CanonicalIdentity_BuildColumnMap(tblConstraints)
 
     RequireColumns_Constraints mapWBS, Array( _
-        "ID", "WBS", "Task Name", "Task Description", "Task Type", _
-        "Calculated Start", "Calculated Finish", "Calculated Duration", "Driving Logic"), "tbl_WBS"
+        VTS_COL_ID, VTS_COL_WBS, VTS_COL_TASK_NAME, VTS_COL_TASK_DESCRIPTION, VTS_COL_TASK_TYPE, _
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH, _
+        VTS_COL_CALCULATED_DURATION, VTS_COL_DRIVING_LOGIC), "tbl_WBS"
 
     RequireColumns_Constraints mapConstraints, ConstraintsHeaders(), CONSTRAINTS_TABLE_NAME
 
@@ -262,17 +322,17 @@ Private Function Sync_Constraints_To_CALC_Impl( _
 
     RequireColumns_Constraints mapCalc, CalcConstraintHeaders(), "tbl_CALC"
     RequireColumns_Constraints mapConstraints, Array( _
-        "ID", _
-        "WBS", _
-        "Task Name", _
-        "Task Type", _
-        "Is Summary", _
-        "Start Constraint Type", _
-        "Start Constraint Date", _
-        "Finish Constraint Type", _
-        "Finish Constraint Date", _
-        "Deadline", _
-        "Active"), CONSTRAINTS_TABLE_NAME
+        VTS_COL_ID, _
+        VTS_COL_WBS, _
+        VTS_COL_TASK_NAME, _
+        VTS_COL_TASK_TYPE, _
+        VTS_COL_IS_SUMMARY, _
+        VTS_COL_START_CONSTRAINT_TYPE, _
+        VTS_COL_START_CONSTRAINT_DATE, _
+        VTS_COL_FINISH_CONSTRAINT_TYPE, _
+        VTS_COL_FINISH_CONSTRAINT_DATE, _
+        VTS_COL_DEADLINE, _
+        VTS_COL_ACTIVE), CONSTRAINTS_TABLE_NAME
 
     If tblCalc.DataBodyRange Is Nothing Then
         If Not tblConstraints.DataBodyRange Is Nothing Then
@@ -295,20 +355,20 @@ Private Function Sync_Constraints_To_CALC_Impl( _
         ValidateActiveConstraints arrConstraints, mapConstraints, calcRowById, consoleMessages
 
         For r = 1 To UBound(arrConstraints, 1)
-            idVal = Trim$(CStr(arrConstraints(r, mapConstraints("ID"))))
-            activeVal = NormalizeActiveValue(arrConstraints(r, mapConstraints("Active")))
+            idVal = Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_ID))))
+            activeVal = NormalizeActiveValue(arrConstraints(r, mapConstraints(VTS_COL_ACTIVE)))
 
-            If HasValue(arrConstraints(r, mapConstraints("Deadline"))) And _
-                Not HasConstraintDate(arrConstraints(r, mapConstraints("Deadline"))) Then
+            If HasValue(arrConstraints(r, mapConstraints(VTS_COL_DEADLINE))) And _
+                Not HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_DEADLINE))) Then
                 Err.Raise vbObjectError + 8614, "Sync_Constraints_To_CALC", _
                     "Invalid deadline in tbl_CONSTRAINTS for ID: " & idVal
             End If
 
             If idVal <> "" Then
                 If calcRowById.Exists(idVal) Then
-                    If HasConstraintDate(arrConstraints(r, mapConstraints("Deadline"))) Then
+                    If HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_DEADLINE))) Then
                         calcRow = CLng(calcRowById(idVal))
-                        arrCalc(calcRow, mapCalc("Deadline")) = arrConstraints(r, mapConstraints("Deadline"))
+                        arrCalc(calcRow, mapCalc("Deadline")) = arrConstraints(r, mapConstraints(VTS_COL_DEADLINE))
                     End If
                 End If
             End If
@@ -319,8 +379,8 @@ Private Function Sync_Constraints_To_CALC_Impl( _
                         "Active constraint row has an empty ID."
                 End If
 
-                If IsConstraintSummaryRow(arrConstraints(r, mapConstraints("Is Summary"))) Then GoTo NextConstraintRow
-                If IsConstraintLevelOfEffort(arrConstraints(r, mapConstraints("Task Type"))) Then GoTo NextConstraintRow
+                If IsConstraintSummaryRow(arrConstraints(r, mapConstraints(VTS_COL_IS_SUMMARY))) Then GoTo NextConstraintRow
+                If IsConstraintLevelOfEffort(arrConstraints(r, mapConstraints(VTS_COL_TASK_TYPE))) Then GoTo NextConstraintRow
 
                 If Not calcRowById.Exists(idVal) Then
                     Err.Raise vbObjectError + 8613, "Sync_Constraints_To_CALC", _
@@ -333,13 +393,13 @@ Private Function Sync_Constraints_To_CALC_Impl( _
 
                 arrCalc(calcRow, mapCalc("Constraint Active")) = "Yes"
                 arrCalc(calcRow, mapCalc("Start Constraint Type")) = _
-                    arrConstraints(r, mapConstraints("Start Constraint Type"))
+                    arrConstraints(r, mapConstraints(VTS_COL_START_CONSTRAINT_TYPE))
                 arrCalc(calcRow, mapCalc("Start Constraint Date")) = _
-                    arrConstraints(r, mapConstraints("Start Constraint Date"))
+                    arrConstraints(r, mapConstraints(VTS_COL_START_CONSTRAINT_DATE))
                 arrCalc(calcRow, mapCalc("Finish Constraint Type")) = _
-                    arrConstraints(r, mapConstraints("Finish Constraint Type"))
+                    arrConstraints(r, mapConstraints(VTS_COL_FINISH_CONSTRAINT_TYPE))
                 arrCalc(calcRow, mapCalc("Finish Constraint Date")) = _
-                    arrConstraints(r, mapConstraints("Finish Constraint Date"))
+                    arrConstraints(r, mapConstraints(VTS_COL_FINISH_CONSTRAINT_DATE))
             End If
 
 NextConstraintRow:
@@ -414,6 +474,7 @@ Private Function EnsureConstraintsTable(ByVal ws As Worksheet) As ListObject
     Dim lc As ListColumn
     Dim headerName As String
 
+    Constraints_SetLanguage Settings_GetOwnerLanguage("CONSTRAINTS")
     headers = ConstraintsHeaders()
     headerCount = UBound(headers) - LBound(headers) + 1
 
@@ -426,7 +487,8 @@ Private Function EnsureConstraintsTable(ByVal ws As Worksheet) As ListObject
         rng.Clear
 
         For i = 0 To headerCount - 1
-            rng.Cells(1, i + 1).value = headers(LBound(headers) + i)
+            rng.Cells(1, i + 1).value = SchemaCurrentColumnTitle( _
+                VTS_TABLE_CONSTRAINTS, CStr(headers(LBound(headers) + i)))
         Next i
 
         Set tbl = ws.ListObjects.Add(xlSrcRange, rng, , xlYes)
@@ -435,7 +497,7 @@ Private Function EnsureConstraintsTable(ByVal ws As Worksheet) As ListObject
         If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.ClearContents
     Else
         For i = LBound(headers) To UBound(headers)
-            headerName = CStr(headers(i))
+            headerName = SchemaCurrentColumnTitle(VTS_TABLE_CONSTRAINTS, CStr(headers(i)))
             Set lc = Nothing
             On Error Resume Next
             Set lc = tbl.ListColumns(headerName)
@@ -452,6 +514,7 @@ Private Function EnsureConstraintsTable(ByVal ws As Worksheet) As ListObject
     Set EnsureConstraintsTable = tbl
 
 End Function
+
 '------------------------------------------------------------------------------
 ' FR: Retourne la valeur Constraints Headers sans modifier les donnees d'entree.
 ' EN: Returns the Constraints Headers value without mutating input data.
@@ -459,24 +522,7 @@ End Function
 
 Private Function ConstraintsHeaders() As Variant
 
-    ConstraintsHeaders = Array( _
-        "ID", _
-        "WBS", _
-        "Task Name", _
-        "Task Description", _
-        "Task Type", _
-        "Is Summary", _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Calculated Duration", _
-        "Driving Logic", _
-        "Start Constraint Type", _
-        "Start Constraint Date", _
-        "Finish Constraint Type", _
-        "Finish Constraint Date", _
-        "Deadline", _
-        "Active", _
-        "Comment")
+    ConstraintsHeaders = SchemaColumnKeys(VTS_TABLE_CONSTRAINTS)
 
 End Function
 
@@ -555,18 +601,18 @@ Private Sub ValidateActiveConstraints( _
     Dim eventHashVal As String
 
     For r = 1 To UBound(arrConstraints, 1)
-        If NormalizeActiveValue(arrConstraints(r, mapConstraints("Active"))) <> "YES" Then GoTo NextRow
+        If NormalizeActiveValue(arrConstraints(r, mapConstraints(VTS_COL_ACTIVE))) <> "YES" Then GoTo NextRow
 
-        idVal = Trim$(CStr(arrConstraints(r, mapConstraints("ID"))))
-        startType = Trim$(CStr(arrConstraints(r, mapConstraints("Start Constraint Type"))))
-        finishType = Trim$(CStr(arrConstraints(r, mapConstraints("Finish Constraint Type"))))
+        idVal = Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_ID))))
+        startType = Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_START_CONSTRAINT_TYPE))))
+        finishType = Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_FINISH_CONSTRAINT_TYPE))))
 
         If idVal = "" Then
             Err.Raise vbObjectError + 8620, "ValidateActiveConstraints", _
                 "Active constraint row has an empty ID."
         End If
 
-        If IsConstraintSummaryRow(arrConstraints(r, mapConstraints("Is Summary"))) Then
+        If IsConstraintSummaryRow(arrConstraints(r, mapConstraints(VTS_COL_IS_SUMMARY))) Then
             eventHashVal = BuildPlanningEventHash( _
                 "WARNING", _
                 "CONSTRAINT_PARENT_IGNORED", _
@@ -577,9 +623,9 @@ Private Sub ValidateActiveConstraints( _
                 "ValidateActiveConstraints", _
                 "CONSTRAINTS", _
                 "tbl_CONSTRAINTS", _
-                Trim$(CStr(arrConstraints(r, mapConstraints("ID")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("WBS")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("Task Name")))))
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_ID)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_WBS)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_TASK_NAME)))))
 
             LogPlanningEvent _
                 "WARNING", _
@@ -592,9 +638,9 @@ Private Sub ValidateActiveConstraints( _
                 "ValidateActiveConstraints", _
                 "CONSTRAINTS", _
                 "tbl_CONSTRAINTS", _
-                Trim$(CStr(arrConstraints(r, mapConstraints("ID")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("WBS")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("Task Name"))))
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_ID)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_WBS)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_TASK_NAME))))
 
             AddConstraintWarning consoleMessages, _
                 BuildConstraintValidationMessage( _
@@ -609,7 +655,7 @@ Private Sub ValidateActiveConstraints( _
             GoTo NextRow
         End If
 
-        If IsConstraintLevelOfEffort(arrConstraints(r, mapConstraints("Task Type"))) Then
+        If IsConstraintLevelOfEffort(arrConstraints(r, mapConstraints(VTS_COL_TASK_TYPE))) Then
             eventHashVal = BuildPlanningEventHash( _
                 "WARNING", _
                 "CONSTRAINT_LOE_IGNORED", _
@@ -620,9 +666,9 @@ Private Sub ValidateActiveConstraints( _
                 "ValidateActiveConstraints", _
                 "CONSTRAINTS", _
                 "tbl_CONSTRAINTS", _
-                Trim$(CStr(arrConstraints(r, mapConstraints("ID")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("WBS")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("Task Name")))))
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_ID)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_WBS)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_TASK_NAME)))))
 
             LogPlanningEvent _
                 "WARNING", _
@@ -635,9 +681,9 @@ Private Sub ValidateActiveConstraints( _
                 "ValidateActiveConstraints", _
                 "CONSTRAINTS", _
                 "tbl_CONSTRAINTS", _
-                Trim$(CStr(arrConstraints(r, mapConstraints("ID")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("WBS")))), _
-                Trim$(CStr(arrConstraints(r, mapConstraints("Task Name"))))
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_ID)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_WBS)))), _
+                Trim$(CStr(arrConstraints(r, mapConstraints(VTS_COL_TASK_NAME))))
 
             AddConstraintWarning consoleMessages, _
                 BuildConstraintValidationMessage( _
@@ -652,8 +698,8 @@ Private Sub ValidateActiveConstraints( _
             GoTo NextRow
         End If
 
-        If HasValue(arrConstraints(r, mapConstraints("Deadline"))) And _
-            Not HasConstraintDate(arrConstraints(r, mapConstraints("Deadline"))) Then
+        If HasValue(arrConstraints(r, mapConstraints(VTS_COL_DEADLINE))) And _
+            Not HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_DEADLINE))) Then
             Err.Raise vbObjectError + 8630, "ValidateActiveConstraints", _
                 BuildConstraintValidationMessage( _
                     arrConstraints, r, mapConstraints, _
@@ -690,7 +736,7 @@ Private Sub ValidateActiveConstraints( _
                     "Unknown finish constraint type")
         End If
 
-        If startType <> "" And Not HasConstraintDate(arrConstraints(r, mapConstraints("Start Constraint Date"))) Then
+        If startType <> "" And Not HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_START_CONSTRAINT_DATE))) Then
             Err.Raise vbObjectError + 8626, "ValidateActiveConstraints", _
                 BuildConstraintValidationMessage( _
                     arrConstraints, r, mapConstraints, _
@@ -698,7 +744,7 @@ Private Sub ValidateActiveConstraints( _
                     "Start constraint type defined without constraint date")
         End If
 
-        If HasConstraintDate(arrConstraints(r, mapConstraints("Start Constraint Date"))) And startType = "" Then
+        If HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_START_CONSTRAINT_DATE))) And startType = "" Then
             Err.Raise vbObjectError + 8627, "ValidateActiveConstraints", _
                 BuildConstraintValidationMessage( _
                     arrConstraints, r, mapConstraints, _
@@ -706,7 +752,7 @@ Private Sub ValidateActiveConstraints( _
                     "Start constraint date defined without constraint type")
         End If
 
-        If finishType <> "" And Not HasConstraintDate(arrConstraints(r, mapConstraints("Finish Constraint Date"))) Then
+        If finishType <> "" And Not HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_FINISH_CONSTRAINT_DATE))) Then
             Err.Raise vbObjectError + 8628, "ValidateActiveConstraints", _
                 BuildConstraintValidationMessage( _
                     arrConstraints, r, mapConstraints, _
@@ -714,7 +760,7 @@ Private Sub ValidateActiveConstraints( _
                     "Finish constraint type defined without constraint date")
         End If
 
-        If HasConstraintDate(arrConstraints(r, mapConstraints("Finish Constraint Date"))) And finishType = "" Then
+        If HasConstraintDate(arrConstraints(r, mapConstraints(VTS_COL_FINISH_CONSTRAINT_DATE))) And finishType = "" Then
             Err.Raise vbObjectError + 8629, "ValidateActiveConstraints", _
                 BuildConstraintValidationMessage( _
                     arrConstraints, r, mapConstraints, _
@@ -747,10 +793,10 @@ Private Function IsActiveConstraintEmpty( _
     ByVal mapConstraints As Object) As Boolean
 
     IsActiveConstraintEmpty = _
-        Trim$(CStr(arrConstraints(rowIdx, mapConstraints("Start Constraint Type")))) = "" And _
-        Not HasConstraintDate(arrConstraints(rowIdx, mapConstraints("Start Constraint Date"))) And _
-        Trim$(CStr(arrConstraints(rowIdx, mapConstraints("Finish Constraint Type")))) = "" And _
-        Not HasConstraintDate(arrConstraints(rowIdx, mapConstraints("Finish Constraint Date")))
+        Trim$(CStr(arrConstraints(rowIdx, mapConstraints(VTS_COL_START_CONSTRAINT_TYPE)))) = "" And _
+        Not HasConstraintDate(arrConstraints(rowIdx, mapConstraints(VTS_COL_START_CONSTRAINT_DATE))) And _
+        Trim$(CStr(arrConstraints(rowIdx, mapConstraints(VTS_COL_FINISH_CONSTRAINT_TYPE)))) = "" And _
+        Not HasConstraintDate(arrConstraints(rowIdx, mapConstraints(VTS_COL_FINISH_CONSTRAINT_DATE)))
 
 End Function
 
@@ -811,7 +857,7 @@ Private Function HasActiveConstraints( _
     arrConstraints = tblConstraints.DataBodyRange.value
 
     For r = 1 To UBound(arrConstraints, 1)
-        If NormalizeActiveValue(arrConstraints(r, mapConstraints("Active"))) = "YES" Then
+        If NormalizeActiveValue(arrConstraints(r, mapConstraints(VTS_COL_ACTIVE))) = "YES" Then
             If IsActiveConstraintEmpty(arrConstraints, r, mapConstraints) Then GoTo NextRow
 
             HasActiveConstraints = True
@@ -942,7 +988,7 @@ Private Function BuildExistingConstraintRows( _
     arr = tbl.DataBodyRange.value
 
     For r = 1 To UBound(arr, 1)
-        idVal = Trim$(CStr(arr(r, mapConstraints("ID"))))
+        idVal = Trim$(CStr(arr(r, mapConstraints(VTS_COL_ID))))
 
         If idVal <> "" Then
             If Not d.Exists(idVal) Then
@@ -999,8 +1045,8 @@ Private Function ConstraintSourceRowHasIdentity( _
 
     If mapWBS Is Nothing Then Exit Function
 
-    If mapWBS.Exists("ID") Then idVal = Trim$(CStr(arrWBS(rowIndex, mapWBS("ID"))))
-    If mapWBS.Exists("WBS") Then wbsVal = NormalizeWBS(CStr(arrWBS(rowIndex, mapWBS("WBS"))))
+    If mapWBS.Exists(VTS_COL_ID) Then idVal = Trim$(CStr(arrWBS(rowIndex, mapWBS(VTS_COL_ID))))
+    If mapWBS.Exists(VTS_COL_WBS) Then wbsVal = NormalizeWBS(CStr(arrWBS(rowIndex, mapWBS(VTS_COL_WBS))))
 
     ConstraintSourceRowHasIdentity = (idVal <> "" Or wbsVal <> "")
 
@@ -1022,7 +1068,7 @@ Private Function BuildSummaryWbsMap( _
     Set d = CreateObject("Scripting.Dictionary")
 
     For r = 1 To UBound(arrWBS, 1)
-        wbsVal = NormalizeWBS(CStr(arrWBS(r, mapWBS("WBS"))))
+        wbsVal = NormalizeWBS(CStr(arrWBS(r, mapWBS(VTS_COL_WBS))))
         parentWbs = GetParentWBS(wbsVal)
 
         If parentWbs <> "" Then d(parentWbs) = True
@@ -1051,8 +1097,8 @@ Private Sub FillConstraintOutputRowFromWBS( _
     Dim wbsVal As String
     Dim existingRow As Object
 
-    idVal = Trim$(CStr(arrWBS(wbsRow, mapWBS("ID"))))
-    wbsVal = NormalizeWBS(CStr(arrWBS(wbsRow, mapWBS("WBS"))))
+    idVal = Trim$(CStr(arrWBS(wbsRow, mapWBS(VTS_COL_ID))))
+    wbsVal = NormalizeWBS(CStr(arrWBS(wbsRow, mapWBS(VTS_COL_WBS))))
 
     If existingById.Exists(idVal) Then
         Set existingRow = existingById(idVal)
@@ -1060,16 +1106,16 @@ Private Sub FillConstraintOutputRowFromWBS( _
         Set existingRow = Nothing
     End If
 
-    outArr(outRow, mapConstraints("ID")) = idVal
-    outArr(outRow, mapConstraints("WBS")) = wbsVal
-    outArr(outRow, mapConstraints("Task Name")) = arrWBS(wbsRow, mapWBS("Task Name"))
-    outArr(outRow, mapConstraints("Task Description")) = arrWBS(wbsRow, mapWBS("Task Description"))
-    outArr(outRow, mapConstraints("Task Type")) = arrWBS(wbsRow, mapWBS("Task Type"))
-    outArr(outRow, mapConstraints("Is Summary")) = IIf(summaryByWbs.Exists(wbsVal), "TRUE", "FALSE")
-    outArr(outRow, mapConstraints("Calculated Start")) = arrWBS(wbsRow, mapWBS("Calculated Start"))
-    outArr(outRow, mapConstraints("Calculated Finish")) = arrWBS(wbsRow, mapWBS("Calculated Finish"))
-    outArr(outRow, mapConstraints("Calculated Duration")) = arrWBS(wbsRow, mapWBS("Calculated Duration"))
-    outArr(outRow, mapConstraints("Driving Logic")) = arrWBS(wbsRow, mapWBS("Driving Logic"))
+    outArr(outRow, mapConstraints(VTS_COL_ID)) = idVal
+    outArr(outRow, mapConstraints(VTS_COL_WBS)) = wbsVal
+    outArr(outRow, mapConstraints(VTS_COL_TASK_NAME)) = arrWBS(wbsRow, mapWBS(VTS_COL_TASK_NAME))
+    outArr(outRow, mapConstraints(VTS_COL_TASK_DESCRIPTION)) = arrWBS(wbsRow, mapWBS(VTS_COL_TASK_DESCRIPTION))
+    outArr(outRow, mapConstraints(VTS_COL_TASK_TYPE)) = arrWBS(wbsRow, mapWBS(VTS_COL_TASK_TYPE))
+    outArr(outRow, mapConstraints(VTS_COL_IS_SUMMARY)) = IIf(summaryByWbs.Exists(wbsVal), "TRUE", "FALSE")
+    outArr(outRow, mapConstraints(VTS_COL_CALCULATED_START)) = arrWBS(wbsRow, mapWBS(VTS_COL_CALCULATED_START))
+    outArr(outRow, mapConstraints(VTS_COL_CALCULATED_FINISH)) = arrWBS(wbsRow, mapWBS(VTS_COL_CALCULATED_FINISH))
+    outArr(outRow, mapConstraints(VTS_COL_CALCULATED_DURATION)) = arrWBS(wbsRow, mapWBS(VTS_COL_CALCULATED_DURATION))
+    outArr(outRow, mapConstraints(VTS_COL_DRIVING_LOGIC)) = arrWBS(wbsRow, mapWBS(VTS_COL_DRIVING_LOGIC))
 
     CopyPreservedConstraintFields outArr, outRow, mapConstraints, existingRow
 
@@ -1109,10 +1155,10 @@ End Sub
 Private Function IsPlanningMirrorField(ByVal fieldName As String) As Boolean
 
     Select Case fieldName
-        Case "Calculated Start", _
-             "Calculated Finish", _
-             "Calculated Duration", _
-             "Driving Logic"
+        Case VTS_COL_CALCULATED_START, _
+             VTS_COL_CALCULATED_FINISH, _
+             VTS_COL_CALCULATED_DURATION, _
+             VTS_COL_DRIVING_LOGIC
             IsPlanningMirrorField = True
     End Select
 
@@ -1133,18 +1179,18 @@ Private Sub CopyPreservedConstraintFields( _
     Dim f As Variant
 
     fields = Array( _
-        "Start Constraint Type", _
-        "Start Constraint Date", _
-        "Finish Constraint Type", _
-        "Finish Constraint Date", _
-        "Deadline", _
-        "Active", _
-        "Comment")
+        VTS_COL_START_CONSTRAINT_TYPE, _
+        VTS_COL_START_CONSTRAINT_DATE, _
+        VTS_COL_FINISH_CONSTRAINT_TYPE, _
+        VTS_COL_FINISH_CONSTRAINT_DATE, _
+        VTS_COL_DEADLINE, _
+        VTS_COL_ACTIVE, _
+        VTS_COL_COMMENT)
 
     For Each f In fields
         If mapConstraints.Exists(CStr(f)) Then
             If existingRow Is Nothing Then
-                If CStr(f) = "Active" Then
+                If CStr(f) = VTS_COL_ACTIVE Then
                     outArr(outRow, mapConstraints(CStr(f))) = "No"
                 Else
                     outArr(outRow, mapConstraints(CStr(f))) = Empty
@@ -1208,26 +1254,30 @@ End Sub
 
 Private Sub ApplyConstraintsFormats(ByVal tbl As ListObject)
 
+    Dim dateFormat As String
+
     On Error Resume Next
 
-    tbl.ListColumns("ID").Range.NumberFormat = "0"
-    tbl.ListColumns("WBS").Range.NumberFormat = "@"
-    tbl.ListColumns("Task Name").Range.NumberFormat = "@"
-    tbl.ListColumns("Task Description").Range.NumberFormat = "@"
-    tbl.ListColumns("Task Type").Range.NumberFormat = "@"
-    tbl.ListColumns("Is Summary").Range.NumberFormat = "@"
-    tbl.ListColumns("Calculated Start").Range.NumberFormat = "dd/mm/yyyy"
-    tbl.ListColumns("Calculated Finish").Range.NumberFormat = "dd/mm/yyyy"
-    tbl.ListColumns("Calculated Duration").Range.NumberFormat = "0"
-    tbl.ListColumns("Driving Logic").Range.NumberFormat = "@"
+    dateFormat = Settings_GetDateNumberFormat()
 
-    tbl.ListColumns("Start Constraint Type").Range.NumberFormat = "@"
-    tbl.ListColumns("Start Constraint Date").Range.NumberFormat = "dd/mm/yyyy"
-    tbl.ListColumns("Finish Constraint Type").Range.NumberFormat = "@"
-    tbl.ListColumns("Finish Constraint Date").Range.NumberFormat = "dd/mm/yyyy"
-    tbl.ListColumns("Deadline").Range.NumberFormat = "dd/mm/yyyy"
-tbl.ListColumns("Active").Range.NumberFormat = "@"
-    tbl.ListColumns("Comment").Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_ID).Range.NumberFormat = "0"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_WBS).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_TASK_NAME).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_TASK_DESCRIPTION).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_TASK_TYPE).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_IS_SUMMARY).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_CALCULATED_START).Range.NumberFormat = dateFormat
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_CALCULATED_FINISH).Range.NumberFormat = dateFormat
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_CALCULATED_DURATION).Range.NumberFormat = "0"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_DRIVING_LOGIC).Range.NumberFormat = "@"
+
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_START_CONSTRAINT_TYPE).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_START_CONSTRAINT_DATE).Range.NumberFormat = dateFormat
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_FINISH_CONSTRAINT_TYPE).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_FINISH_CONSTRAINT_DATE).Range.NumberFormat = dateFormat
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_DEADLINE).Range.NumberFormat = dateFormat
+SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_ACTIVE).Range.NumberFormat = "@"
+    SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_COMMENT).Range.NumberFormat = "@"
 
     ApplyConstraintsValidation tbl
     tbl.Range.Columns.AutoFit
@@ -1247,7 +1297,7 @@ Private Sub ApplyConstraintsValidation(ByVal tbl As ListObject)
 
     If tbl.DataBodyRange Is Nothing Then Exit Sub
 
-    With tbl.ListColumns("Start Constraint Type").DataBodyRange.Validation
+    With SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_START_CONSTRAINT_TYPE).DataBodyRange.Validation
         .Delete
         .Add Type:=xlValidateList, _
              AlertStyle:=xlValidAlertWarning, _
@@ -1255,15 +1305,19 @@ Private Sub ApplyConstraintsValidation(ByVal tbl As ListObject)
              Formula1:="Start No Earlier Than,Start No Later Than,Must Start On"
         .IgnoreBlank = True
         .InCellDropdown = True
-        .InputTitle = "Start Constraint Type"
-        .InputMessage = "Choose blank, Start No Earlier Than, Start No Later Than, or Must Start On."
-        .ErrorTitle = "Unknown Start Constraint Type"
-        .errorMessage = "Use Start No Earlier Than, Start No Later Than, or Must Start On."
+        .InputTitle = Constraints_L("Type de contrainte de debut", "Start Constraint Type")
+        .InputMessage = Constraints_L( _
+            "Choisir vide, Start No Earlier Than, Start No Later Than ou Must Start On.", _
+            "Choose blank, Start No Earlier Than, Start No Later Than, or Must Start On.")
+        .ErrorTitle = Constraints_L("Type de contrainte de debut inconnu", "Unknown Start Constraint Type")
+        .errorMessage = Constraints_L( _
+            "Utiliser Start No Earlier Than, Start No Later Than ou Must Start On.", _
+            "Use Start No Earlier Than, Start No Later Than, or Must Start On.")
         .ShowInput = True
         .ShowError = True
     End With
 
-    With tbl.ListColumns("Finish Constraint Type").DataBodyRange.Validation
+    With SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_FINISH_CONSTRAINT_TYPE).DataBodyRange.Validation
         .Delete
         .Add Type:=xlValidateList, _
              AlertStyle:=xlValidAlertWarning, _
@@ -1271,15 +1325,19 @@ Private Sub ApplyConstraintsValidation(ByVal tbl As ListObject)
              Formula1:="Finish No Earlier Than,Finish No Later Than,Must Finish On"
         .IgnoreBlank = True
         .InCellDropdown = True
-        .InputTitle = "Finish Constraint Type"
-        .InputMessage = "Choose blank, Finish No Earlier Than, Finish No Later Than, or Must Finish On."
-        .ErrorTitle = "Unknown Finish Constraint Type"
-        .errorMessage = "Use Finish No Earlier Than, Finish No Later Than, or Must Finish On."
+        .InputTitle = Constraints_L("Type de contrainte de fin", "Finish Constraint Type")
+        .InputMessage = Constraints_L( _
+            "Choisir vide, Finish No Earlier Than, Finish No Later Than ou Must Finish On.", _
+            "Choose blank, Finish No Earlier Than, Finish No Later Than, or Must Finish On.")
+        .ErrorTitle = Constraints_L("Type de contrainte de fin inconnu", "Unknown Finish Constraint Type")
+        .errorMessage = Constraints_L( _
+            "Utiliser Finish No Earlier Than, Finish No Later Than ou Must Finish On.", _
+            "Use Finish No Earlier Than, Finish No Later Than, or Must Finish On.")
         .ShowInput = True
         .ShowError = True
     End With
 
-    With tbl.ListColumns("Active").DataBodyRange.Validation
+    With SchemaListColumn(tbl, VTS_TABLE_CONSTRAINTS, VTS_COL_ACTIVE).DataBodyRange.Validation
         .Delete
         .Add Type:=xlValidateList, _
              AlertStyle:=xlValidAlertWarning, _
@@ -1287,10 +1345,10 @@ Private Sub ApplyConstraintsValidation(ByVal tbl As ListObject)
              Formula1:="Yes,No"
         .IgnoreBlank = True
         .InCellDropdown = True
-        .InputTitle = "Active"
-        .InputMessage = "Choose Yes or No."
-        .ErrorTitle = "Unknown Active value"
-        .errorMessage = "Recommended values: Yes or No."
+        .InputTitle = Constraints_L("Actif", "Active")
+        .InputMessage = Constraints_L("Choisir Yes ou No.", "Choose Yes or No.")
+        .ErrorTitle = Constraints_L("Valeur Active inconnue", "Unknown Active value")
+        .errorMessage = Constraints_L("Valeurs recommandees : Yes ou No.", "Recommended values: Yes or No.")
         .ShowInput = True
         .ShowError = True
     End With

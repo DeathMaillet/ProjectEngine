@@ -100,12 +100,8 @@ SafeExit:
         Application.EnableEvents = oldEvents
     End If
 
-    If errorDescription <> "" Then
-        CalcBridge_ShowSingleConsoleMessage _
-            "STOP", _
-            "Erreur dans Gantt_ApplyLanguage : " & errorDescription, _
-            "Error in Gantt_ApplyLanguage: " & errorDescription
-    End If
+    If errorDescription <> "" Then _
+        Err.Raise vbObjectError + 5211, "Gantt_ApplyLanguage", errorDescription
 
 End Sub
 '------------------------------------------------------------------------------
@@ -134,6 +130,14 @@ Public Function Gantt_CurrentLanguage() As String
     EnsureGanttLanguageInitialized
     Gantt_CurrentLanguage = gGanttLanguage
 
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Retourne un texte Gantt dans la langue runtime deja hydratee.
+' EN: Returns Gantt text in the already hydrated runtime language.
+'------------------------------------------------------------------------------
+Public Function Gantt_Text(ByVal frText As String, ByVal enText As String) As String
+    Gantt_Text = Gantt_L(frText, enText)
 End Function
 
 '------------------------------------------------------------------------------

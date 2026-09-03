@@ -655,6 +655,15 @@ Public Sub GanttRefresh_InvalidateDifferentialState(Optional ByVal reason As Str
 
 End Sub
 
+Public Sub GanttRefresh_MarkRenderSignatureDirty(Optional ByVal reason As String = "")
+
+    gLastRenderSignature = ""
+    If Len(reason) > 0 Then
+        Profiler_RecordOperation "GanttRenderSignatureDirty_" & reason, 1, 0#
+    End If
+
+End Sub
+
 '------------------------------------------------------------------------------
 ' FR: Applique uniquement le style analytique des shapes existantes.
 ' EN: Applies only analytical styling to existing shapes.
@@ -866,14 +875,14 @@ Private Function GanttRefresh_BuildRenderSignature( _
         GanttRefresh_SignatureValue(projectFinish) & "|" & CStr(totalDays)
 
     For r = 1 To UBound(dataArr, 1)
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+        idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
         progressVal = GanttLive_GetDisplayProgress(idVal, baseById, testById, isTestMode)
-        taskNameVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, "Task Name")
-        taskTypeVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, "Task Type")
-        summaryDisplayVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, "S")
-        criticalPathVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, "Critical Path")
-        longestPathVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, "Longest Path")
+        taskNameVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, VTS_COL_TASK_NAME)
+        taskTypeVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, VTS_COL_TASK_TYPE)
+        summaryDisplayVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, VTS_COL_S)
+        criticalPathVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, VTS_COL_CRITICAL_PATH)
+        longestPathVal = GanttRefresh_ArrayText(dataArr, r, mapWBS, VTS_COL_LONGEST_PATH)
         parts(r) = _
             idVal & "|" & wbsVal & "|" & taskNameVal & "|" & taskTypeVal & "|" & _
             summaryDisplayVal & "|" & criticalPathVal & "|" & longestPathVal & "|" & _
@@ -895,12 +904,12 @@ Private Function GanttRefresh_ArrayText( _
     ByRef dataArr As Variant, _
     ByVal dataRow As Long, _
     ByVal columnMap As Object, _
-    ByVal columnName As String) As String
+    ByVal columnKey As String) As String
 
     If columnMap Is Nothing Then Exit Function
-    If Not columnMap.Exists(columnName) Then Exit Function
+    If Not columnMap.Exists(columnKey) Then Exit Function
 
-    GanttRefresh_ArrayText = CStr(dataArr(dataRow, CLng(columnMap(columnName))))
+    GanttRefresh_ArrayText = CStr(dataArr(dataRow, CLng(columnMap(columnKey))))
 
 End Function
 

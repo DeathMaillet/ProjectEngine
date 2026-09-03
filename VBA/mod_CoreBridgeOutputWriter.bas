@@ -121,10 +121,13 @@ Public Sub Push_Calculated_Back_To_WBS_Partial(ByVal impactedIds As Object)
     Dim calcRowById As Object
 
     Dim allowedFields As Variant
+    Dim authorizedFields As Variant
     Dim r As Long
     Dim i As Long
     Dim id As String
     Dim calcRow As Long
+    Dim fieldKey As String
+    Dim calcFieldName As String
     Dim writeScopeToken As Long
     Dim errorNumber As Long
     Dim errorDescription As String
@@ -149,7 +152,7 @@ Public Sub Push_Calculated_Back_To_WBS_Partial(ByVal impactedIds As Object)
     Set mapCalc = CanonicalIdentity_BuildColumnMap(tblCalc)
     Set calcRowById = CreateObject("Scripting.Dictionary")
 
-    If Not mapWBS.Exists("ID") Then
+    If Not mapWBS.Exists(VTS_COL_ID) Then
         Err.Raise vbObjectError + 2101, "Push_Calculated_Back_To_WBS_Partial", _
             "Missing column in tbl_WBS: ID"
     End If
@@ -160,22 +163,31 @@ Public Sub Push_Calculated_Back_To_WBS_Partial(ByVal impactedIds As Object)
     End If
 
     allowedFields = Array( _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Driving Logic", _
-        "Deadline Float" _
+        VTS_COL_CALCULATED_START, _
+        VTS_COL_CALCULATED_FINISH, _
+        VTS_COL_DRIVING_LOGIC, _
+        VTS_COL_DEADLINE_FLOAT _
     )
+
+    authorizedFields = Array( _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_START), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_FINISH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DRIVING_LOGIC), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DEADLINE_FLOAT))
 
     For i = LBound(allowedFields) To UBound(allowedFields)
 
-        If Not mapWBS.Exists(CStr(allowedFields(i))) Then
+        fieldKey = CStr(allowedFields(i))
+        calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, fieldKey)
+
+        If Not mapWBS.Exists(fieldKey) Then
             Err.Raise vbObjectError + 2110 + i, "Push_Calculated_Back_To_WBS_Partial", _
-                "Missing output column in tbl_WBS: " & CStr(allowedFields(i))
+                "Missing output column in tbl_WBS: " & fieldKey
         End If
 
-        If Not mapCalc.Exists(CStr(allowedFields(i))) Then
+        If Not mapCalc.Exists(calcFieldName) Then
             Err.Raise vbObjectError + 2120 + i, "Push_Calculated_Back_To_WBS_Partial", _
-                "Missing output column in tbl_CALC: " & CStr(allowedFields(i))
+                "Missing output column in tbl_CALC: " & calcFieldName
         End If
 
     Next i
@@ -188,11 +200,11 @@ Public Sub Push_Calculated_Back_To_WBS_Partial(ByVal impactedIds As Object)
     Next r
 
     writeScopeToken = OpenAuthorizedWBSWriteScope( _
-        "Push_Calculated_Back_To_WBS_Partial", allowedFields)
+        "Push_Calculated_Back_To_WBS_Partial", authorizedFields)
 
     For r = 1 To tblWBS.ListRows.Count
 
-        id = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value))
+        id = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).value))
 
         If id <> "" Then
             If impactedIds.Exists(id) Then
@@ -202,14 +214,17 @@ Public Sub Push_Calculated_Back_To_WBS_Partial(ByVal impactedIds As Object)
                     calcRow = CLng(calcRowById(id))
 
                     For i = LBound(allowedFields) To UBound(allowedFields)
-                        tblWBS.DataBodyRange.Cells(r, mapWBS(CStr(allowedFields(i)))).value = _
-                            tblCalc.DataBodyRange.Cells(calcRow, mapCalc(CStr(allowedFields(i)))).value
+                        fieldKey = CStr(allowedFields(i))
+                        calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, fieldKey)
+                        tblWBS.DataBodyRange.Cells(r, mapWBS(fieldKey)).value = _
+                            tblCalc.DataBodyRange.Cells(calcRow, mapCalc(calcFieldName)).value
                     Next i
 
                 Else
 
                     For i = LBound(allowedFields) To UBound(allowedFields)
-                        tblWBS.DataBodyRange.Cells(r, mapWBS(CStr(allowedFields(i)))).ClearContents
+                        fieldKey = CStr(allowedFields(i))
+                        tblWBS.DataBodyRange.Cells(r, mapWBS(fieldKey)).ClearContents
                     Next i
 
                 End If
@@ -314,7 +329,8 @@ Public Sub Push_Calculated_Back_To_WBS()
     Dim calcRows As Long
 
     Dim id As String
-    Dim fieldName As String
+    Dim fieldKey As String
+    Dim calcFieldName As String
     Dim calcRow As Long
 
     Dim consoleMessages As Collection
@@ -336,49 +352,45 @@ Public Sub Push_Calculated_Back_To_WBS()
     If tblWBS.DataBodyRange Is Nothing Then Exit Sub
     If tblCalc.DataBodyRange Is Nothing Then Exit Sub
 
-    Set mapWBS = CreateObject("Scripting.Dictionary")
+    Set mapWBS = SchemaBuildColumnKeyMap(tblWBS, VTS_TABLE_WBS)
     Set mapCalc = CreateObject("Scripting.Dictionary")
     Set calcRowById = CreateObject("Scripting.Dictionary")
     Set outCols = CreateObject("Scripting.Dictionary")
 
     allowedFields = Array( _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Driving Logic", _
-        "Critical Path", _
-        "Longest Path", _
-        "Critical Path REX", _
-        "Total Float", _
-        "Free Float", _
-        "Total Float REX", _
-        "Free Float REX", _
-        "Deadline Float")
+        VTS_COL_CALCULATED_START, _
+        VTS_COL_CALCULATED_FINISH, _
+        VTS_COL_DRIVING_LOGIC, _
+        VTS_COL_CRITICAL_PATH, _
+        VTS_COL_LONGEST_PATH, _
+        VTS_COL_CRITICAL_PATH_REX, _
+        VTS_COL_TOTAL_FLOAT, _
+        VTS_COL_FREE_FLOAT, _
+        VTS_COL_TOTAL_FLOAT_REX, _
+        VTS_COL_FREE_FLOAT_REX, _
+        VTS_COL_DEADLINE_FLOAT)
 
     authorizedFields = Array( _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Driving Logic", _
-        "Critical Path", _
-        "Longest Path", _
-        "Critical Path REX", _
-        "Total Float", _
-        "Free Float", _
-        "Total Float REX", _
-        "Free Float REX", _
-        "Deadline Float", _
-        "Baseline Finish", _
-        "Actual Duration", _
-        "Calculated Duration")
-
-    For c = 1 To tblWBS.ListColumns.Count
-        mapWBS(tblWBS.ListColumns(c).Name) = c
-    Next c
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_START), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_FINISH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DRIVING_LOGIC), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_LONGEST_PATH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FREE_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FREE_FLOAT_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DEADLINE_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION))
 
     For c = 1 To tblCalc.ListColumns.Count
         mapCalc(tblCalc.ListColumns(c).Name) = c
     Next c
 
-    If Not mapWBS.Exists("ID") Then
+    If Not mapWBS.Exists(VTS_COL_ID) Then
         CoreBridgeOutputWriter_AddConsoleMessage consoleMessages, "STOP", _
             "La colonne ID est introuvable dans tbl_WBS.", _
             "Column ID was not found in tbl_WBS."
@@ -394,19 +406,20 @@ Public Sub Push_Calculated_Back_To_WBS()
 
     For i = LBound(allowedFields) To UBound(allowedFields)
 
-        fieldName = CStr(allowedFields(i))
+        fieldKey = CStr(allowedFields(i))
+        calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, fieldKey)
 
-        If Not mapWBS.Exists(fieldName) Then
+        If Not mapWBS.Exists(fieldKey) Then
             CoreBridgeOutputWriter_AddConsoleMessage consoleMessages, "STOP", _
-                "Colonne de sortie introuvable dans tbl_WBS : " & fieldName, _
-                "Output column not found in tbl_WBS: " & fieldName
+                "Colonne de sortie introuvable dans tbl_WBS : " & fieldKey, _
+                "Output column not found in tbl_WBS: " & fieldKey
             GoTo SafeExit
         End If
 
-        If Not mapCalc.Exists(fieldName) Then
+        If Not mapCalc.Exists(calcFieldName) Then
             CoreBridgeOutputWriter_AddConsoleMessage consoleMessages, "STOP", _
-                "Colonne de sortie introuvable dans tbl_CALC : " & fieldName, _
-                "Output column not found in tbl_CALC: " & fieldName
+                "Colonne de sortie introuvable dans tbl_CALC : " & calcFieldName, _
+                "Output column not found in tbl_CALC: " & calcFieldName
             GoTo SafeExit
         End If
 
@@ -429,17 +442,18 @@ Public Sub Push_Calculated_Back_To_WBS()
 
     For i = LBound(allowedFields) To UBound(allowedFields)
 
-        fieldName = CStr(allowedFields(i))
+        fieldKey = CStr(allowedFields(i))
+        calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, fieldKey)
         ReDim outArr(1 To wbsRows, 1 To 1)
 
         For r = 1 To wbsRows
 
-            id = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
+            id = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
 
             If id <> "" Then
                 If calcRowById.Exists(id) Then
                     calcRow = CLng(calcRowById(id))
-                    outArr(r, 1) = arrCalc(calcRow, mapCalc(fieldName))
+                    outArr(r, 1) = arrCalc(calcRow, mapCalc(calcFieldName))
                 Else
                     outArr(r, 1) = Empty
                 End If
@@ -449,7 +463,7 @@ Public Sub Push_Calculated_Back_To_WBS()
 
         Next r
 
-        outCols(fieldName) = outArr
+        outCols(fieldKey) = outArr
 
     Next i
 
@@ -457,8 +471,8 @@ Public Sub Push_Calculated_Back_To_WBS()
         "Push_Calculated_Back_To_WBS", authorizedFields)
 
     For i = LBound(allowedFields) To UBound(allowedFields)
-        fieldName = CStr(allowedFields(i))
-        tblWBS.ListColumns(fieldName).DataBodyRange.value = outCols(fieldName)
+        fieldKey = CStr(allowedFields(i))
+        SchemaListColumn(tblWBS, VTS_TABLE_WBS, fieldKey).DataBodyRange.value = outCols(fieldKey)
     Next i
 
     RestoreWBSFormulaColumns tblWBS

@@ -52,6 +52,7 @@ Public Function CommitGanttUpdate( _
     If normalizedScope = GANTT_UPDATE_SCOPE_PARTIAL Then normalizedScope = GANTT_UPDATE_SCOPE_INCREMENTAL
 
     Set ws = ThisWorkbook.Worksheets("GANTT")
+    GanttEngine_PrepareShowIntent ws, normalizedIntent, reason
 
     Select Case normalizedIntent
         Case GANTT_RENDER_INTENT_DEFER
@@ -181,6 +182,26 @@ Private Sub GanttEngine_RearmDragWatcherIfReady(ByVal renderIntent As String)
         GanttDrag_EnsureArmed
     End If
     On Error GoTo 0
+
+End Sub
+
+Private Sub GanttEngine_PrepareShowIntent( _
+    ByVal ws As Worksheet, _
+    ByVal renderIntent As String, _
+    ByVal reason As String)
+
+    If ws Is Nothing Then Exit Sub
+    If UCase$(Trim$(renderIntent)) <> GANTT_RENDER_INTENT_SHOW Then Exit Sub
+
+    If Not ActiveSheet Is Nothing Then
+        If ActiveSheet Is ws Then
+            Profiler_RecordOperation "GanttEngineShowIntentAlreadyActive", 1, 0#
+            Exit Sub
+        End If
+    End If
+
+    EnsureGanttVisualLayoutReadyBeforeDrawing ws, True, True
+    Profiler_RecordOperation "GanttEngineShowIntentActivations", 1, 0#
 
 End Sub
 

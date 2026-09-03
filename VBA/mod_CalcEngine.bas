@@ -1546,20 +1546,16 @@ Public Sub Push_CriticalPathREX_Back_To_WBS()
     If tblWBS.DataBodyRange Is Nothing Then Exit Sub
     If tblCalc.DataBodyRange Is Nothing Then Exit Sub
 
-    Set mapWBS = CreateObject("Scripting.Dictionary")
+    Set mapWBS = SchemaBuildColumnKeyMap(tblWBS, VTS_TABLE_WBS)
     Set mapCalc = CreateObject("Scripting.Dictionary")
     Set calcById = CreateObject("Scripting.Dictionary")
-
-    For r = 1 To tblWBS.ListColumns.Count
-        mapWBS(tblWBS.ListColumns(r).Name) = r
-    Next r
 
     For r = 1 To tblCalc.ListColumns.Count
         mapCalc(tblCalc.ListColumns(r).Name) = r
     Next r
 
-    If Not mapWBS.Exists("ID") Then Exit Sub
-    If Not mapWBS.Exists("Critical Path REX") Then Exit Sub
+    If Not mapWBS.Exists(VTS_COL_ID) Then Exit Sub
+    If Not mapWBS.Exists(VTS_COL_CRITICAL_PATH_REX) Then Exit Sub
     If Not mapCalc.Exists("ID") Then Exit Sub
     If Not mapCalc.Exists("Critical Path REX") Then Exit Sub
 
@@ -1571,15 +1567,16 @@ Public Sub Push_CriticalPathREX_Back_To_WBS()
     Next r
 
     writeScopeToken = OpenAuthorizedWBSWriteScope( _
-        "Push_CriticalPathREX_Back_To_WBS", Array("Critical Path REX"))
+        "Push_CriticalPathREX_Back_To_WBS", _
+        Array(SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH_REX)))
 
     For r = 1 To tblWBS.ListRows.Count
-        id = Trim(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value))
+        id = Trim(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).value))
         If id <> "" Then
             If calcById.Exists(id) Then
-                tblWBS.DataBodyRange.Cells(r, mapWBS("Critical Path REX")).value = calcById(id)
+                tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CRITICAL_PATH_REX)).value = calcById(id)
             Else
-                tblWBS.DataBodyRange.Cells(r, mapWBS("Critical Path REX")).ClearContents
+                tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CRITICAL_PATH_REX)).ClearContents
             End If
         End If
     Next r
@@ -1792,7 +1789,7 @@ Public Sub Push_Analytics_Back_To_WBS()
     Set mapWBS = CanonicalIdentity_BuildColumnMap(tblWBS)
     Set mapCalc = CanonicalIdentity_BuildColumnMap(tblCalc)
 
-    If Not mapWBS.Exists("ID") Then Err.Raise vbObjectError + 1301, "Push_Analytics_Back_To_WBS", "Missing column in tbl_WBS: ID"
+    If Not mapWBS.Exists(VTS_COL_ID) Then Err.Raise vbObjectError + 1301, "Push_Analytics_Back_To_WBS", "Missing column in tbl_WBS: ID"
     If Not mapCalc.Exists("ID") Then Err.Raise vbObjectError + 1302, "Push_Analytics_Back_To_WBS", "Missing column in tbl_CALC: ID"
 
     arrCalc = tblCalc.DataBodyRange.value
@@ -1812,36 +1809,36 @@ Public Sub Push_Analytics_Back_To_WBS()
 
     writeScopeToken = OpenAuthorizedWBSWriteScope( _
         "Push_Analytics_Back_To_WBS", Array( _
-        "Critical Path", _
-        "Longest Path", _
-        "Critical Path REX", _
-        "Longest Path REX", _
-        "Total Float", _
-        "Free Float", _
-        "Total Float REX", _
-        "Free Float REX", _
-        "Deadline Float"))
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_LONGEST_PATH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_LONGEST_PATH_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FREE_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FREE_FLOAT_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DEADLINE_FLOAT)))
 
-    If mapWBS.Exists("Critical Path") And mapWBS.Exists("Critical Path REX") And _
-       mapWBS.Exists("Longest Path") And mapWBS.Exists("Longest Path REX") Then
-        pathStartCol = CLng(mapWBS("Critical Path"))
-        If CLng(mapWBS("Critical Path REX")) = pathStartCol + 1 And _
-           CLng(mapWBS("Longest Path")) = pathStartCol + 2 And _
-           CLng(mapWBS("Longest Path REX")) = pathStartCol + 3 Then
+    If mapWBS.Exists(VTS_COL_CRITICAL_PATH) And mapWBS.Exists(VTS_COL_CRITICAL_PATH_REX) And _
+       mapWBS.Exists(VTS_COL_LONGEST_PATH) And mapWBS.Exists(VTS_COL_LONGEST_PATH_REX) Then
+        pathStartCol = CLng(mapWBS(VTS_COL_CRITICAL_PATH))
+        If CLng(mapWBS(VTS_COL_CRITICAL_PATH_REX)) = pathStartCol + 1 And _
+           CLng(mapWBS(VTS_COL_LONGEST_PATH)) = pathStartCol + 2 And _
+           CLng(mapWBS(VTS_COL_LONGEST_PATH_REX)) = pathStartCol + 3 Then
             blockPath = tblWBS.DataBodyRange.Cells(1, pathStartCol).Resize(rowCount, 4).Value2
         End If
     End If
 
-    If mapWBS.Exists("Total Float") And mapWBS.Exists("Free Float") And _
-       mapWBS.Exists("Total Float REX") And mapWBS.Exists("Free Float REX") And _
-       mapWBS.Exists("Deadline Float") Then
-        floatStartCol = CLng(mapWBS("Total Float"))
+    If mapWBS.Exists(VTS_COL_TOTAL_FLOAT) And mapWBS.Exists(VTS_COL_FREE_FLOAT) And _
+       mapWBS.Exists(VTS_COL_TOTAL_FLOAT_REX) And mapWBS.Exists(VTS_COL_FREE_FLOAT_REX) And _
+       mapWBS.Exists(VTS_COL_DEADLINE_FLOAT) Then
+        floatStartCol = CLng(mapWBS(VTS_COL_TOTAL_FLOAT))
         blockFloat = tblWBS.DataBodyRange.Cells(1, floatStartCol).Resize(rowCount, 5).Value2
     End If
 
     For r = 1 To rowCount
 
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
 
         If idVal <> "" Then
             If calcRowById.Exists(idVal) Then
@@ -1854,10 +1851,10 @@ Public Sub Push_Analytics_Back_To_WBS()
                     If mapCalc.Exists("Longest Path") Then blockPath(r, 3) = arrCalc(calcRow, mapCalc("Longest Path"))
                     If mapCalc.Exists("Longest Path REX") Then blockPath(r, 4) = arrCalc(calcRow, mapCalc("Longest Path REX"))
                 Else
-                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Critical Path"
-                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Critical Path REX"
-                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Longest Path"
-                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, "Longest Path REX"
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, VTS_COL_CRITICAL_PATH
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, VTS_COL_CRITICAL_PATH_REX
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, VTS_COL_LONGEST_PATH
+                    PushOneAnalyticsCellIfExists tblWBS, arrCalc, r, calcRow, mapWBS, mapCalc, VTS_COL_LONGEST_PATH_REX
                 End If
 
                 If IsArray(blockFloat) Then
@@ -1876,10 +1873,10 @@ Public Sub Push_Analytics_Back_To_WBS()
                     blockPath(r, 3) = Empty
                     blockPath(r, 4) = Empty
                 Else
-                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Critical Path"
-                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Critical Path REX"
-                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Longest Path"
-                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, "Longest Path REX"
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, VTS_COL_CRITICAL_PATH
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, VTS_COL_CRITICAL_PATH_REX
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, VTS_COL_LONGEST_PATH
+                    ClearOneAnalyticsCellIfExists tblWBS, r, mapWBS, VTS_COL_LONGEST_PATH_REX
                 End If
 
                 If IsArray(blockFloat) Then
@@ -1935,17 +1932,20 @@ Private Sub PushOneAnalyticsCellIfExists( _
     ByVal calcRow As Long, _
     ByVal mapWBS As Object, _
     ByVal mapCalc As Object, _
-    ByVal fieldName As String)
+    ByVal columnKey As String)
 
-    If Not IsAllowedAnalyticsPushField(fieldName) Then
+    Dim calcFieldName As String
+
+    If Not IsAllowedAnalyticsPushField(columnKey) Then
         Err.Raise vbObjectError + 1303, "PushOneAnalyticsCellIfExists", _
-            "Forbidden analytics WBS write attempted: " & fieldName
+            "Forbidden analytics WBS write attempted: " & columnKey
     End If
 
-    If mapWBS.Exists(fieldName) Then
-        If mapCalc.Exists(fieldName) Then
-            tblWBS.DataBodyRange.Cells(wbsRow, mapWBS(fieldName)).value = _
-                arrCalc(calcRow, mapCalc(fieldName))
+    calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, columnKey)
+    If mapWBS.Exists(columnKey) Then
+        If mapCalc.Exists(calcFieldName) Then
+            tblWBS.DataBodyRange.Cells(wbsRow, mapWBS(columnKey)).value = _
+                arrCalc(calcRow, mapCalc(calcFieldName))
         End If
     End If
 
@@ -1959,15 +1959,15 @@ Private Sub ClearOneAnalyticsCellIfExists( _
     ByVal tblWBS As ListObject, _
     ByVal wbsRow As Long, _
     ByVal mapWBS As Object, _
-    ByVal fieldName As String)
+    ByVal columnKey As String)
 
-    If Not IsAllowedAnalyticsPushField(fieldName) Then
+    If Not IsAllowedAnalyticsPushField(columnKey) Then
         Err.Raise vbObjectError + 1304, "ClearOneAnalyticsCellIfExists", _
-            "Forbidden analytics WBS clear attempted: " & fieldName
+            "Forbidden analytics WBS clear attempted: " & columnKey
     End If
 
-    If mapWBS.Exists(fieldName) Then
-        tblWBS.DataBodyRange.Cells(wbsRow, mapWBS(fieldName)).ClearContents
+    If mapWBS.Exists(columnKey) Then
+        tblWBS.DataBodyRange.Cells(wbsRow, mapWBS(columnKey)).ClearContents
     End If
 
 End Sub
@@ -1976,18 +1976,18 @@ End Sub
 ' FR: Indique si Allowed Analytics Push Field est vrai pour le contexte courant.
 ' EN: Returns whether Allowed Analytics Push Field is true for the current context.
 '------------------------------------------------------------------------------
-Private Function IsAllowedAnalyticsPushField(ByVal fieldName As String) As Boolean
+Private Function IsAllowedAnalyticsPushField(ByVal columnKey As String) As Boolean
 
-    Select Case fieldName
-        Case "Critical Path", _
-             "Longest Path", _
-             "Critical Path REX", _
-             "Longest Path REX", _
-             "Total Float", _
-             "Free Float", _
-             "Total Float REX", _
-             "Free Float REX", _
-             "Deadline Float"
+    Select Case columnKey
+        Case VTS_COL_CRITICAL_PATH, _
+             VTS_COL_LONGEST_PATH, _
+             VTS_COL_CRITICAL_PATH_REX, _
+             VTS_COL_LONGEST_PATH_REX, _
+             VTS_COL_TOTAL_FLOAT, _
+             VTS_COL_FREE_FLOAT, _
+             VTS_COL_TOTAL_FLOAT_REX, _
+             VTS_COL_FREE_FLOAT_REX, _
+             VTS_COL_DEADLINE_FLOAT
             IsAllowedAnalyticsPushField = True
 
         Case Else
@@ -2065,7 +2065,7 @@ Public Sub Validate_LogicLinksNetwork()
         Exit Sub
     End If
 
-    Set mapWBS = CreateObject("Scripting.Dictionary")
+    Set mapWBS = SchemaBuildColumnKeyMap(tblWBS, VTS_TABLE_WBS)
     Set network = ParsedPlanningNetwork_ParseTable(tblLinks)
     Set taskInfoById = CreateObject("Scripting.Dictionary")
     Set childrenByPred = CreateObject("Scripting.Dictionary")
@@ -2082,17 +2082,13 @@ Public Sub Validate_LogicLinksNetwork()
     Set errNotPositionable = CreateObject("Scripting.Dictionary")
     Set errLOEPred = CreateObject("Scripting.Dictionary")
 
-    For i = 1 To tblWBS.ListColumns.Count
-        mapWBS(tblWBS.ListColumns(i).Name) = i
-    Next i
+    If Not mapWBS.Exists(VTS_COL_ID) Then Err.Raise vbObjectError + 801, , "Missing column in tbl_WBS: ID"
+    If Not mapWBS.Exists(VTS_COL_WBS) Then Err.Raise vbObjectError + 802, , "Missing column in tbl_WBS: WBS"
+    If Not mapWBS.Exists(VTS_COL_BASELINE_START) Then Err.Raise vbObjectError + 803, , "Missing column in tbl_WBS: Baseline Start"
+    If Not mapWBS.Exists(VTS_COL_FORECAST_START) Then Err.Raise vbObjectError + 804, , "Missing column in tbl_WBS: Forecast Start"
+    If Not mapWBS.Exists(VTS_COL_ACTUAL_START) Then Err.Raise vbObjectError + 805, , "Missing column in tbl_WBS: Actual Start"
 
-    If Not mapWBS.Exists("ID") Then Err.Raise vbObjectError + 801, , "Missing column in tbl_WBS: ID"
-    If Not mapWBS.Exists("WBS") Then Err.Raise vbObjectError + 802, , "Missing column in tbl_WBS: WBS"
-    If Not mapWBS.Exists("Baseline Start") Then Err.Raise vbObjectError + 803, , "Missing column in tbl_WBS: Baseline Start"
-    If Not mapWBS.Exists("Forecast Start") Then Err.Raise vbObjectError + 804, , "Missing column in tbl_WBS: Forecast Start"
-    If Not mapWBS.Exists("Actual Start") Then Err.Raise vbObjectError + 805, , "Missing column in tbl_WBS: Actual Start"
-
-    hasTaskType = mapWBS.Exists("Task Type")
+    hasTaskType = mapWBS.Exists(VTS_COL_TASK_TYPE)
 
     If Not network.HasColumn("Succ ID") Then Err.Raise vbObjectError + 806, , "Missing column in tbl_LOGIC_LINKS: Succ ID"
     If Not network.HasColumn("Pred ID") Then Err.Raise vbObjectError + 807, , "Missing column in tbl_LOGIC_LINKS: Pred ID"
@@ -2101,22 +2097,22 @@ Public Sub Validate_LogicLinksNetwork()
 
     For r = 1 To UBound(arrWBS, 1)
 
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(arrWBS(r, mapWBS("WBS")))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(arrWBS(r, mapWBS(VTS_COL_WBS)))
 
         If idVal <> "" Then
 
             If hasTaskType Then
-                taskTypeVal = UCase$(Trim$(CStr(arrWBS(r, mapWBS("Task Type")))))
+                taskTypeVal = UCase$(Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_TASK_TYPE)))))
             Else
                 taskTypeVal = ""
             End If
 
             Set info = CreateObject("Scripting.Dictionary")
             info("WBS") = wbsVal
-            info("HasBaselineStart") = HasValue(arrWBS(r, mapWBS("Baseline Start")))
-            info("HasForecastStart") = HasValue(arrWBS(r, mapWBS("Forecast Start")))
-            info("HasActualStart") = HasValue(arrWBS(r, mapWBS("Actual Start")))
+            info("HasBaselineStart") = HasValue(arrWBS(r, mapWBS(VTS_COL_BASELINE_START)))
+            info("HasForecastStart") = HasValue(arrWBS(r, mapWBS(VTS_COL_FORECAST_START)))
+            info("HasActualStart") = HasValue(arrWBS(r, mapWBS(VTS_COL_ACTUAL_START)))
             info("Task Type") = taskTypeVal
 
             If taskInfoById.Exists(CStr(idVal)) Then
@@ -2593,12 +2589,12 @@ Public Sub Test_WBS_UnauthorizedWrite()
 
     BeginMacroRun "Test_WBS_UnauthorizedWrite"
 
-    oldVal = tbl.ListColumns("Calculated Start").DataBodyRange.Cells(1, 1).value
+    oldVal = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_START).DataBodyRange.Cells(1, 1).value
 
     If IsDate(oldVal) Then
-        tbl.ListColumns("Calculated Start").DataBodyRange.Cells(1, 1).value = CDate(oldVal) + 1
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_START).DataBodyRange.Cells(1, 1).value = CDate(oldVal) + 1
     Else
-        tbl.ListColumns("Calculated Start").DataBodyRange.Cells(1, 1).value = Date + 7
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_START).DataBodyRange.Cells(1, 1).value = Date + 7
     End If
 
     If IsMacroAbortRequested() Then

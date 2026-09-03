@@ -156,16 +156,16 @@ Public Sub GanttScenarioService_RunScenarioEngine( _
 
     For r = 1 To rowCount
 
-        idVal = Trim$(CStr(dataWBS(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(CStr(dataWBS(r, mapWBS("WBS"))))
-        taskTypeVal = Trim$(CStr(dataWBS(r, mapWBS("Task Type"))))
+        idVal = Trim$(CStr(dataWBS(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(CStr(dataWBS(r, mapWBS(VTS_COL_WBS))))
+        taskTypeVal = Trim$(CStr(dataWBS(r, mapWBS(VTS_COL_TASK_TYPE))))
 
         testRow = testRow + 1
 
         baseStart = Empty
         baseFinish = Empty
         baseDuration = Empty
-        baseProgress = GetCellValue(dataWBS(r, mapWBS("% Progress")))
+        baseProgress = GetCellValue(dataWBS(r, mapWBS(VTS_COL_PROGRESS_PERCENT)))
         drivingLogic = ""
 
         If calcRowById.Exists(idVal) Then
@@ -240,7 +240,7 @@ Public Sub GanttScenarioService_RunScenarioEngine( _
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "ID")) = idVal
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "WBS")) = wbsVal
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Task Type")) = taskTypeVal
-        outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Cal")) = NormalizeCalendarType(dataWBS(r, mapWBS("Cal")))
+        outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Cal")) = NormalizeCalendarType(dataWBS(r, mapWBS(VTS_COL_CAL)))
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Is Summary")) = IIf(isSummary, "YES", "NO")
         outArr(testRow, GetColumnIndex_GanttLive(tblTest, "Parent ID")) = GetParentIdFromWBS(wbsVal, wbsToId)
 

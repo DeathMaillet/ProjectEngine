@@ -121,10 +121,10 @@ Public Function CountRenderableGanttRows(ByRef dataArr As Variant, ByVal mapWBS 
     End If
 
     If mapWBS Is Nothing Then Exit Function
-    If Not mapWBS.Exists("S") Then Exit Function
+    If Not mapWBS.Exists(VTS_COL_S) Then Exit Function
 
     For r = 1 To rowCount
-        summaryDisplayVal = UCase$(Trim$(CStr(dataArr(r, mapWBS("S")))))
+        summaryDisplayVal = UCase$(Trim$(CStr(dataArr(r, mapWBS(VTS_COL_S)))))
         If summaryDisplayVal = "Y" Then CountRenderableGanttRows = CountRenderableGanttRows + 1
     Next r
 
@@ -163,16 +163,16 @@ Public Sub ValidateGanttSourceColumns(ByVal mapWBS As Object)
     Dim c As Variant
 
     requiredCols = Array( _
-        "ID", _
-        "WBS", _
-        "Task Name", _
-        "S", _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Calculated Duration", _
-        "% Progress", _
-        "Driving Logic", _
-        "Critical Path" _
+        VTS_COL_ID, _
+        VTS_COL_WBS, _
+        VTS_COL_TASK_NAME, _
+        VTS_COL_S, _
+        VTS_COL_CALCULATED_START, _
+        VTS_COL_CALCULATED_FINISH, _
+        VTS_COL_CALCULATED_DURATION, _
+        VTS_COL_PROGRESS_PERCENT, _
+        VTS_COL_DRIVING_LOGIC, _
+        VTS_COL_CRITICAL_PATH _
     )
 
     For Each c In requiredCols
@@ -352,7 +352,7 @@ Private Sub GetProjectDisplayRange( _
 
     For r = 1 To UBound(dataArr, 1)
 
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
 
         displayStart = GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode)
         displayFinish = GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode)
@@ -375,4 +375,3 @@ Private Sub GetProjectDisplayRange( _
     Next r
 
 End Sub
-

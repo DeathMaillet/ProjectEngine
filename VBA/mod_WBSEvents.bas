@@ -17,7 +17,7 @@ Attribute VB_Name = "mod_WBSEvents"
 '===============================================================================
 
 '=================================================
-' WBS EVENT HANDLER – INPUT / OUTPUT CONTROL
+' WBS EVENT HANDLER â€“ INPUT / OUTPUT CONTROL
 '
 ' Philosophy:
 ' - Blue columns = user input (editable)
@@ -75,12 +75,12 @@ Public Sub Handle_WBS_Change(ByVal ws As Worksheet, ByVal Target As Range)
     Set tbl = ws.ListObjects("tbl_WBS")
     If tbl.DataBodyRange Is Nothing Then Exit Sub
 
-    Set rngWBS = tbl.ListColumns("WBS").DataBodyRange
-    Set rngPredWBS = tbl.ListColumns("Predecessors WBS").DataBodyRange
-    Set rngTaskType = tbl.ListColumns("Task Type").DataBodyRange
-    If WBSHasColumn(tbl, "S") Then Set rngSummaryDisplay = tbl.ListColumns("S").DataBodyRange
-    If WBSHasColumn(tbl, "Cal") Then Set rngCal = tbl.ListColumns("Cal").DataBodyRange
-    Set rngBaselineDuration = tbl.ListColumns("Baseline Duration").DataBodyRange
+    Set rngWBS = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_WBS).DataBodyRange
+    Set rngPredWBS = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_PREDECESSORS_WBS).DataBodyRange
+    Set rngTaskType = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TASK_TYPE).DataBodyRange
+    If WBSHasSchemaColumn(tbl, VTS_COL_S) Then Set rngSummaryDisplay = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_S).DataBodyRange
+    If WBSHasSchemaColumn(tbl, VTS_COL_CAL) Then Set rngCal = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CAL).DataBodyRange
+    Set rngBaselineDuration = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_DURATION).DataBodyRange
 
     Set rngEditableCols = GetWBSUserEditableRange(tbl)
     Set rngLockedCols = GetWBSLockedRange(tbl)
@@ -127,9 +127,9 @@ Public Sub Handle_WBS_Change(ByVal ws As Worksheet, ByVal Target As Range)
 
                 RequestMacroAbort _
                     "Handle_WBS_Change", _
-                    "Écriture moteur interdite dans une colonne calculée de WBS." & vbCrLf & _
+                    "Ã‰criture moteur interdite dans une colonne calculÃ©e de WBS." & vbCrLf & _
                     "-> source : " & GetAuthorizedWBSWriteSource() & vbCrLf & _
-                    "-> le macro-run est arrêté pour éviter une corruption de données.", _
+                    "-> le macro-run est arrÃªtÃ© pour Ã©viter une corruption de donnÃ©es.", _
                     "Engine write not allowed in a calculated WBS column." & vbCrLf & _
                     "-> source: " & GetAuthorizedWBSWriteSource() & vbCrLf & _
                     "-> the macro run was stopped to prevent data corruption."
@@ -141,8 +141,8 @@ Public Sub Handle_WBS_Change(ByVal ws As Worksheet, ByVal Target As Range)
             Application.Undo
 
             WBS_ShowConsoleMessage vbExclamation, _
-                "Modification interdite dans une colonne calculée (grise)." & vbCrLf & _
-                "-> modifier uniquement les colonnes d'entrée (bleues).", _
+                "Modification interdite dans une colonne calculÃ©e (grise)." & vbCrLf & _
+                "-> modifier uniquement les colonnes d'entrÃ©e (bleues).", _
                 "Manual edit not allowed in calculated column (gray)." & vbCrLf & _
                 "-> edit input columns only (blue)."
             GoTo SafeExit
@@ -182,7 +182,7 @@ ContinueValidation:
                     If IsMacroRunActive() Then
                         RequestMacroAbort _
                             "Handle_WBS_Change", _
-                            "Format invalide détecté dans WBS pendant l'exécution d'un macro." & vbCrLf & _
+                            "Format invalide dÃ©tectÃ© dans WBS pendant l'exÃ©cution d'un macro." & vbCrLf & _
                             "-> format attendu : 1 | 1.2 | 1.2.3", _
                             "Invalid WBS format detected during macro execution." & vbCrLf & _
                             "-> expected format: 1 | 1.2 | 1.2.3"
@@ -245,8 +245,8 @@ ContinueValidation:
                     If IsMacroRunActive() Then
                         RequestMacroAbort _
                             "Handle_WBS_Change", _
-                            "Task Type invalide détecté pendant l'exécution d'un macro." & vbCrLf & _
-                            "-> valeurs autorisées : Task | Milestone | Level of Effort", _
+                            "Task Type invalide dÃ©tectÃ© pendant l'exÃ©cution d'un macro." & vbCrLf & _
+                            "-> valeurs autorisÃ©es : Task | Milestone | Level of Effort", _
                             "Invalid Task Type detected during macro execution." & vbCrLf & _
                             "-> allowed values: Task | Milestone | Level of Effort"
                         Exit Sub
@@ -257,7 +257,7 @@ ContinueValidation:
 
                     WBS_ShowConsoleMessage vbExclamation, _
                         "Task Type invalide." & vbCrLf & _
-                        "-> valeurs autorisées : Task | Milestone | Level of Effort", _
+                        "-> valeurs autorisÃ©es : Task | Milestone | Level of Effort", _
                         "Invalid Task Type." & vbCrLf & _
                         "-> allowed values: Task | Milestone | Level of Effort"
                     GoTo SafeExit
@@ -370,7 +370,7 @@ SafeExit:
             RequestMacroAbort _
                 "Handle_WBS_Change", _
                 "Erreur VBA dans Handle_WBS_Change." & vbCrLf & _
-                "-> le macro-run est arrêté pour éviter une cascade d'erreurs.", _
+                "-> le macro-run est arrÃªtÃ© pour Ã©viter une cascade d'erreurs.", _
                 "VBA error in Handle_WBS_Change." & vbCrLf & _
                 "-> the macro run was stopped to avoid an error cascade."
             Exit Sub
@@ -378,7 +378,7 @@ SafeExit:
 
         WBS_ShowConsoleMessage vbCritical, _
             "Erreur VBA dans Handle_WBS_Change" & vbCrLf & _
-            "-> vérifier le dernier bloc modifié dans mod_WBSEvents", _
+            "-> vÃ©rifier le dernier bloc modifiÃ© dans mod_WBSEvents", _
             "VBA error in Handle_WBS_Change" & vbCrLf & _
             "-> check the last edited block in mod_WBSEvents"
     End If
@@ -398,6 +398,7 @@ Private Function IsWBSFormulaColumnAutofillEvent( _
     Dim col As ListColumn
     Dim hit As Range
     Dim touchedFormulaColumn As Boolean
+    Dim columnKey As String
 
     On Error GoTo SafeExit
 
@@ -414,10 +415,11 @@ Private Function IsWBSFormulaColumnAutofillEvent( _
         End If
 
         If Not hit Is Nothing Then
-            If Not IsWBSFormulaManagedColumn(col.Name) Then Exit Function
+            columnKey = WBSFormulaManagedColumnKey(tbl, col)
+            If Len(columnKey) = 0 Then Exit Function
             If hit.Areas.Count <> 1 Then Exit Function
             If hit.Address(False, False) <> col.DataBodyRange.Address(False, False) Then Exit Function
-            If Not WBSFormulaColumnHasExpectedFormula(col) Then Exit Function
+            If Not WBSFormulaColumnHasExpectedFormula(col, columnKey) Then Exit Function
             touchedFormulaColumn = True
         End If
     Next col
@@ -431,12 +433,17 @@ End Function
 ' FR: Indique si WBSFormula Managed Column est vrai pour le contexte courant.
 ' EN: Returns whether WBSFormula Managed Column is true for the current context.
 '------------------------------------------------------------------------------
-Private Function IsWBSFormulaManagedColumn(ByVal columnName As String) As Boolean
+Private Function WBSFormulaManagedColumnKey( _
+    ByVal tbl As ListObject, _
+    ByVal col As ListColumn) As String
 
-    Select Case CStr(columnName)
-        Case "Baseline Finish", "Actual Duration", "Calculated Duration"
-            IsWBSFormulaManagedColumn = True
-    End Select
+    If col.Index = SchemaColumnIndex(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH) Then
+        WBSFormulaManagedColumnKey = VTS_COL_BASELINE_FINISH
+    ElseIf col.Index = SchemaColumnIndex(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION) Then
+        WBSFormulaManagedColumnKey = VTS_COL_ACTUAL_DURATION
+    ElseIf col.Index = SchemaColumnIndex(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION) Then
+        WBSFormulaManagedColumnKey = VTS_COL_CALCULATED_DURATION
+    End If
 
 End Function
 
@@ -445,7 +452,9 @@ End Function
 ' EN: Returns the WBS Formula Column Has Expected Formula value without mutating input data.
 '------------------------------------------------------------------------------
 
-Private Function WBSFormulaColumnHasExpectedFormula(ByVal col As ListColumn) As Boolean
+Private Function WBSFormulaColumnHasExpectedFormula( _
+    ByVal col As ListColumn, _
+    ByVal columnKey As String) As Boolean
 
     Dim expectedFormula As String
     Dim currentFormula As String
@@ -456,8 +465,7 @@ Private Function WBSFormulaColumnHasExpectedFormula(ByVal col As ListColumn) As 
     If col.DataBodyRange Is Nothing Then Exit Function
     If col.DataBodyRange.Cells.CountLarge = 0 Then Exit Function
 
-    expectedFormula = ExpectedWBSFormulaInvariant(col.Name)
-    If Len(expectedFormula) = 0 Then Exit Function
+    expectedFormula = ExpectedWBSFormulaInvariant(columnKey)
 
     currentFormula = CStr(col.DataBodyRange.Cells(1, 1).Formula)
     WBSFormulaColumnHasExpectedFormula = (StrComp(currentFormula, expectedFormula, vbTextCompare) = 0)
@@ -470,30 +478,23 @@ End Function
 ' EN: Returns the expected WBS formula in Excel's invariant English syntax.
 '------------------------------------------------------------------------------
 
-Private Function ExpectedWBSFormulaInvariant(ByVal columnName As String) As String
+Private Function ExpectedWBSFormulaInvariant(ByVal columnKey As String) As String
 
-    Select Case CStr(columnName)
-        Case "Baseline Finish"
-            ExpectedWBSFormulaInvariant = "=IF(OR([@[Baseline Start]]="""",[@[Baseline Duration]]=""""),"""",[@[Baseline Start]]+[@[Baseline Duration]]-1)"
-        Case "Actual Duration"
-            ExpectedWBSFormulaInvariant = "=IF(OR([@[Actual Start]]="""",[@[Actual Finish]]=""""),"""",[@[Actual Finish]]-[@[Actual Start]]+1)"
-        Case "Calculated Duration"
-            ExpectedWBSFormulaInvariant = "=IF(OR([@[Calculated Start]]="""",[@[Calculated Finish]]=""""),"""",[@[Calculated Finish]]-[@[Calculated Start]]+1)"
-    End Select
+    ExpectedWBSFormulaInvariant = WBSFormulaWriter_ExpectedFormula(columnKey)
 
 End Function
 '------------------------------------------------------------------------------
 ' FR: Resout Project et accepte l'ancien nom Package jusqu'a la migration d'onboarding.
 ' EN: Resolves Project and accepts the legacy Package name until onboarding migration.
 '------------------------------------------------------------------------------
-Private Function WBSProjectColumnName(ByVal tbl As ListObject) As String
+Private Function WBSProjectListColumn(ByVal tbl As ListObject) As ListColumn
 
-    If WBSHasColumn(tbl, "Project") Then
-        WBSProjectColumnName = "Project"
-    ElseIf WBSHasColumn(tbl, "Package") Then
-        WBSProjectColumnName = "Package"
+    If WBSHasSchemaColumn(tbl, VTS_COL_PROJECT) Then
+        Set WBSProjectListColumn = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_PROJECT)
+    ElseIf WBSHasPhysicalColumn(tbl, "Package") Then
+        Set WBSProjectListColumn = tbl.ListColumns("Package")
     Else
-        Err.Raise vbObjectError + 2340, "WBSProjectColumnName", _
+        Err.Raise vbObjectError + 2340, "WBSProjectListColumn", _
             "Missing canonical WBS column: Project (legacy alias: Package)."
     End If
 
@@ -508,33 +509,33 @@ Private Function GetWBSUserEditableRange(ByVal tbl As ListObject) As Range
     Dim rng As Range
 
     Set rng = Union( _
-        tbl.ListColumns("WBS").DataBodyRange, _
-        tbl.ListColumns("Task Name").DataBodyRange, _
-        tbl.ListColumns("Task Description").DataBodyRange, _
-        tbl.ListColumns("Discipline").DataBodyRange, _
-        tbl.ListColumns("Supplier").DataBodyRange, _
-        tbl.ListColumns(WBSProjectColumnName(tbl)).DataBodyRange, _
-        tbl.ListColumns("Task Type").DataBodyRange)
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_WBS).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TASK_NAME).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TASK_DESCRIPTION).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_DISCIPLINE).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_SUPPLIER).DataBodyRange, _
+        WBSProjectListColumn(tbl).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TASK_TYPE).DataBodyRange)
 
-    If WBSHasColumn(tbl, "Cal") Then
-        Set rng = Union(rng, tbl.ListColumns("Cal").DataBodyRange)
+    If WBSHasSchemaColumn(tbl, VTS_COL_CAL) Then
+        Set rng = Union(rng, SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CAL).DataBodyRange)
     End If
 
-    If WBSHasColumn(tbl, "S") Then
-        Set rng = Union(rng, tbl.ListColumns("S").DataBodyRange)
+    If WBSHasSchemaColumn(tbl, VTS_COL_S) Then
+        Set rng = Union(rng, SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_S).DataBodyRange)
     End If
     Set GetWBSUserEditableRange = Union( _
         rng, _
-        tbl.ListColumns("Predecessors WBS").DataBodyRange, _
-        tbl.ListColumns("Weight (%)").DataBodyRange, _
-        tbl.ListColumns("% Progress").DataBodyRange, _
-        tbl.ListColumns("Comments").DataBodyRange, _
-        tbl.ListColumns("Baseline Start").DataBodyRange, _
-        tbl.ListColumns("Baseline Duration").DataBodyRange, _
-        tbl.ListColumns("Actual Start").DataBodyRange, _
-        tbl.ListColumns("Actual Finish").DataBodyRange, _
-        tbl.ListColumns("Forecast Start").DataBodyRange, _
-        tbl.ListColumns("Forecast Finish").DataBodyRange _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_PREDECESSORS_WBS).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_WEIGHT_PERCENT).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_PROGRESS_PERCENT).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_COMMENTS).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_START).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_DURATION).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_START).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_FINISH).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FORECAST_START).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FORECAST_FINISH).DataBodyRange _
     )
 
 End Function
@@ -543,7 +544,14 @@ End Function
 ' EN: Returns the WBS Has Column reference without mutating input data.
 '------------------------------------------------------------------------------
 
-Private Function WBSHasColumn(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
+Private Function WBSHasSchemaColumn(ByVal tbl As ListObject, ByVal columnKey As String) As Boolean
+
+    WBSHasSchemaColumn = WBSHasPhysicalColumn( _
+        tbl, SchemaCurrentColumnTitle(VTS_TABLE_WBS, columnKey))
+
+End Function
+
+Private Function WBSHasPhysicalColumn(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
 
     Dim col As ListColumn
 
@@ -551,7 +559,7 @@ Private Function WBSHasColumn(ByVal tbl As ListObject, ByVal columnName As Strin
     Set col = tbl.ListColumns(columnName)
     On Error GoTo 0
 
-    WBSHasColumn = Not col Is Nothing
+    WBSHasPhysicalColumn = Not col Is Nothing
 
 End Function
 '------------------------------------------------------------------------------
@@ -561,22 +569,22 @@ End Function
 Private Function GetWBSLockedRange(ByVal tbl As ListObject) As Range
 
     Set GetWBSLockedRange = Union( _
-        tbl.ListColumns("Baseline Finish").DataBodyRange, _
-        tbl.ListColumns("Actual Duration").DataBodyRange, _
-        tbl.ListColumns("Calculated Start").DataBodyRange, _
-        tbl.ListColumns("Calculated Finish").DataBodyRange, _
-        tbl.ListColumns("Calculated Duration").DataBodyRange, _
-        tbl.ListColumns("Start Variance").DataBodyRange, _
-        tbl.ListColumns("Finish Variance").DataBodyRange, _
-        tbl.ListColumns("Duration Variance").DataBodyRange, _
-        tbl.ListColumns("Driving Logic").DataBodyRange, _
-        tbl.ListColumns("Critical Path").DataBodyRange, _
-        tbl.ListColumns("Longest Path").DataBodyRange, _
-        tbl.ListColumns("Critical Path REX").DataBodyRange, _
-        tbl.ListColumns("Total Float").DataBodyRange, _
-        tbl.ListColumns("Free Float").DataBodyRange, _
-        tbl.ListColumns("Total Float REX").DataBodyRange, _
-        tbl.ListColumns("Free Float REX").DataBodyRange _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_START).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_FINISH).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_START_VARIANCE).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FINISH_VARIANCE).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_DURATION_VARIANCE).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_DRIVING_LOGIC).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_LONGEST_PATH).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH_REX).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FREE_FLOAT).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT_REX).DataBodyRange, _
+        SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FREE_FLOAT_REX).DataBodyRange _
     )
 
 End Function

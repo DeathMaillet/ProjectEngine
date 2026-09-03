@@ -37,9 +37,9 @@ Public Function BuildConstraintValidationMessage( _
     Dim frText As String
     Dim enText As String
 
-    idVal = Trim$(CStr(arrConstraints(rowIdx, mapConstraints("ID"))))
-    wbsVal = Trim$(CStr(arrConstraints(rowIdx, mapConstraints("WBS"))))
-    taskName = Trim$(CStr(arrConstraints(rowIdx, mapConstraints("Task Name"))))
+    idVal = Trim$(CStr(arrConstraints(rowIdx, mapConstraints(VTS_COL_ID))))
+    wbsVal = Trim$(CStr(arrConstraints(rowIdx, mapConstraints(VTS_COL_WBS))))
+    taskName = Trim$(CStr(arrConstraints(rowIdx, mapConstraints(VTS_COL_TASK_NAME))))
 
     frText = "FR:" & vbCrLf & frPrefix
     If Trim$(frExplanation) <> "" Then

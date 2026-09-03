@@ -133,12 +133,12 @@ Private Sub CoreBridgePreCoreHarness_PrepareRows( _
     Next r
 
     For r = 1 To 2
-        tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).Value = "CBH-OUT-" & CStr(r)
-        tblWBS.DataBodyRange.Cells(r, mapWBS("WBS")).Value = "31.13." & CStr(r)
-        tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Start")).Value = DateSerial(2026, 1, r)
-        tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Finish")).Value = DateSerial(2026, 1, r + 1)
-        tblWBS.DataBodyRange.Cells(r, mapWBS("Driving Logic")).Value = "before-" & CStr(r)
-        tblWBS.DataBodyRange.Cells(r, mapWBS("Deadline Float")).Value = 99 + r
+        tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).Value = "CBH-OUT-" & CStr(r)
+        tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_WBS)).Value = "31.13." & CStr(r)
+        tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_START)).Value = DateSerial(2026, 1, r)
+        tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_FINISH)).Value = DateSerial(2026, 1, r + 1)
+        tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_DRIVING_LOGIC)).Value = "before-" & CStr(r)
+        tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_DEADLINE_FLOAT)).Value = 99 + r
     Next r
 
     For r = 1 To tblLinks.ListRows.Count
@@ -329,7 +329,7 @@ Private Sub CoreBridgePreCoreHarness_TestPartialOutputWrites( _
     tblCalc.DataBodyRange.Cells(1, mapCalc("Deadline Float")).Value = -2
     tblCalc.DataBodyRange.Cells(2, mapCalc("Calculated Start")).Value = DateSerial(2026, 5, 1)
     row2Before = tblCalc.DataBodyRange.Cells(2, mapCalc("Calculated Start")).Value
-    wbsRow2Before = tblWBS.DataBodyRange.Cells(2, mapWBS("Calculated Start")).Value
+    wbsRow2Before = tblWBS.DataBodyRange.Cells(2, mapWBS(VTS_COL_CALCULATED_START)).Value
 
     arrCalc = tblCalc.DataBodyRange.Value
     arrCalc(1, mapCalc("Calculated Start")) = DateSerial(2026, 6, 1)
@@ -349,9 +349,9 @@ Private Sub CoreBridgePreCoreHarness_TestPartialOutputWrites( _
 
     Push_Calculated_Back_To_WBS_Partial impactedIds
 
-    CoreBridgePreCoreHarness_Assert CStr(tblWBS.DataBodyRange.Cells(1, mapWBS("Driving Logic")).Value) = "after-1", "partial WBS push copied driving logic"
-    CoreBridgePreCoreHarness_Assert CDbl(tblWBS.DataBodyRange.Cells(1, mapWBS("Deadline Float")).Value) = -2#, "partial WBS push copied deadline float"
-    CoreBridgePreCoreHarness_Assert CLng(CDate(tblWBS.DataBodyRange.Cells(2, mapWBS("Calculated Start")).Value)) = CLng(CDate(wbsRow2Before)), "partial WBS push left non-impacted row"
+    CoreBridgePreCoreHarness_Assert CStr(tblWBS.DataBodyRange.Cells(1, mapWBS(VTS_COL_DRIVING_LOGIC)).Value) = "after-1", "partial WBS push copied driving logic"
+    CoreBridgePreCoreHarness_Assert CDbl(tblWBS.DataBodyRange.Cells(1, mapWBS(VTS_COL_DEADLINE_FLOAT)).Value) = -2#, "partial WBS push copied deadline float"
+    CoreBridgePreCoreHarness_Assert CLng(CDate(tblWBS.DataBodyRange.Cells(2, mapWBS(VTS_COL_CALCULATED_START)).Value)) = CLng(CDate(wbsRow2Before)), "partial WBS push left non-impacted row"
 
 End Sub
 
@@ -376,26 +376,28 @@ Private Sub CoreBridgePreCoreHarness_TestFullOutputWrites( _
     Dim impactedIds As Object
     Dim expectedShared As Object
     Dim i As Long
-    Dim fieldName As String
+    Dim fieldKey As String
+    Dim calcFieldName As String
     Dim wbsSentinel As Date
 
     fullWBSFields = Array( _
-        "Calculated Start", "Calculated Finish", "Driving Logic", _
-        "Critical Path", "Longest Path", "Critical Path REX", _
-        "Total Float", "Free Float", "Total Float REX", _
-        "Free Float REX", "Deadline Float")
-    sharedFields = Array("Calculated Start", "Calculated Finish", "Driving Logic", "Deadline Float")
+        VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH, VTS_COL_DRIVING_LOGIC, _
+        VTS_COL_CRITICAL_PATH, VTS_COL_LONGEST_PATH, VTS_COL_CRITICAL_PATH_REX, _
+        VTS_COL_TOTAL_FLOAT, VTS_COL_FREE_FLOAT, VTS_COL_TOTAL_FLOAT_REX, _
+        VTS_COL_FREE_FLOAT_REX, VTS_COL_DEADLINE_FLOAT)
+    sharedFields = Array(VTS_COL_CALCULATED_START, VTS_COL_CALCULATED_FINISH, _
+                         VTS_COL_DRIVING_LOGIC, VTS_COL_DEADLINE_FLOAT)
 
     CoreBridgePreCoreHarness_RequireColumns mapWBS, fullWBSFields, "tbl_WBS"
-    CoreBridgePreCoreHarness_RequireColumns mapCalc, fullWBSFields, "tbl_CALC"
+    CoreBridgePreCoreHarness_RequireCalcColumnsForWBSKeys mapCalc, fullWBSFields
 
     tblCalc.DataBodyRange.Cells(1, mapCalc("ID")).Value = "CBH-OUT-1"
     tblCalc.DataBodyRange.Cells(2, mapCalc("ID")).Value = "CBH-OUT-2"
-    tblWBS.DataBodyRange.Cells(1, mapWBS("ID")).Value = "CBH-OUT-1"
-    tblWBS.DataBodyRange.Cells(2, mapWBS("ID")).Value = "CBH-OUT-2"
+    tblWBS.DataBodyRange.Cells(1, mapWBS(VTS_COL_ID)).Value = "CBH-OUT-1"
+    tblWBS.DataBodyRange.Cells(2, mapWBS(VTS_COL_ID)).Value = "CBH-OUT-2"
 
     wbsSentinel = DateSerial(2025, 12, 31)
-    tblWBS.DataBodyRange.Cells(1, mapWBS("Calculated Start")).Value = wbsSentinel
+    tblWBS.DataBodyRange.Cells(1, mapWBS(VTS_COL_CALCULATED_START)).Value = wbsSentinel
 
     arrCalc = tblCalc.DataBodyRange.Value
     arrCalc(1, mapCalc("Calculated Start")) = DateSerial(2026, 8, 3)
@@ -416,7 +418,7 @@ Private Sub CoreBridgePreCoreHarness_TestFullOutputWrites( _
     CoreBridgePreCoreHarness_Assert CLng(tblCalc.DataBodyRange.Cells(1, mapCalc("Calculated Duration")).Value) = 5, "full CALC write copied duration"
     CoreBridgePreCoreHarness_Assert CStr(tblCalc.DataBodyRange.Cells(1, mapCalc("Error flag")).Value) = "FULL-ERR", "full CALC write copied error flag"
     CoreBridgePreCoreHarness_Assert CStr(tblCalc.DataBodyRange.Cells(1, mapCalc("ErrorMsg")).Value) = "Full writer harness", "full CALC write copied error message"
-    CoreBridgePreCoreHarness_Assert CLng(CDate(tblWBS.DataBodyRange.Cells(1, mapWBS("Calculated Start")).Value)) = CLng(wbsSentinel), "CALC write precedes WBS push"
+    CoreBridgePreCoreHarness_Assert CLng(CDate(tblWBS.DataBodyRange.Cells(1, mapWBS(VTS_COL_CALCULATED_START)).Value)) = CLng(wbsSentinel), "CALC write precedes WBS push"
 
     tblCalc.DataBodyRange.Cells(1, mapCalc("Driving Logic")).Value = "FULL-DRIVE"
     tblCalc.DataBodyRange.Cells(1, mapCalc("Critical Path")).Value = "Yes"
@@ -431,20 +433,21 @@ Private Sub CoreBridgePreCoreHarness_TestFullOutputWrites( _
     Push_Calculated_Back_To_WBS
 
     For i = LBound(fullWBSFields) To UBound(fullWBSFields)
-        fieldName = CStr(fullWBSFields(i))
+        fieldKey = CStr(fullWBSFields(i))
+        calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, fieldKey)
         CoreBridgePreCoreHarness_Assert _
-            CStr(tblWBS.DataBodyRange.Cells(1, mapWBS(fieldName)).Value) = _
-            CStr(tblCalc.DataBodyRange.Cells(1, mapCalc(fieldName)).Value), _
-            "full WBS push copied " & fieldName
+            CStr(tblWBS.DataBodyRange.Cells(1, mapWBS(fieldKey)).Value) = _
+            CStr(tblCalc.DataBodyRange.Cells(1, mapCalc(calcFieldName)).Value), _
+            "full WBS push copied " & fieldKey
     Next i
 
-    CoreBridgePreCoreHarness_Assert Left$(CStr(tblWBS.ListColumns("Calculated Duration").DataBodyRange.Cells(1, 1).Formula), 1) = "=", "full WBS push restored calculated duration formula"
+    CoreBridgePreCoreHarness_Assert Left$(CStr(SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION).DataBodyRange.Cells(1, 1).Formula), 1) = "=", "full WBS push restored calculated duration formula"
 
     Set expectedShared = CreateObject("Scripting.Dictionary")
     For i = LBound(sharedFields) To UBound(sharedFields)
-        fieldName = CStr(sharedFields(i))
-        expectedShared(fieldName) = tblWBS.DataBodyRange.Cells(1, mapWBS(fieldName)).Value
-        tblWBS.DataBodyRange.Cells(1, mapWBS(fieldName)).ClearContents
+        fieldKey = CStr(sharedFields(i))
+        expectedShared(fieldKey) = tblWBS.DataBodyRange.Cells(1, mapWBS(fieldKey)).Value
+        tblWBS.DataBodyRange.Cells(1, mapWBS(fieldKey)).ClearContents
     Next i
 
     Set impactedIds = CreateObject("Scripting.Dictionary")
@@ -452,10 +455,27 @@ Private Sub CoreBridgePreCoreHarness_TestFullOutputWrites( _
     Push_Calculated_Back_To_WBS_Partial impactedIds
 
     For i = LBound(sharedFields) To UBound(sharedFields)
-        fieldName = CStr(sharedFields(i))
+        fieldKey = CStr(sharedFields(i))
         CoreBridgePreCoreHarness_Assert _
-            CStr(tblWBS.DataBodyRange.Cells(1, mapWBS(fieldName)).Value) = CStr(expectedShared(fieldName)), _
-            "full and partial WBS outputs agree for " & fieldName
+            CStr(tblWBS.DataBodyRange.Cells(1, mapWBS(fieldKey)).Value) = CStr(expectedShared(fieldKey)), _
+            "full and partial WBS outputs agree for " & fieldKey
+    Next i
+
+End Sub
+
+Private Sub CoreBridgePreCoreHarness_RequireCalcColumnsForWBSKeys( _
+    ByVal mapCalc As Object, _
+    ByVal columnKeys As Variant)
+
+    Dim i As Long
+    Dim calcFieldName As String
+
+    For i = LBound(columnKeys) To UBound(columnKeys)
+        calcFieldName = SchemaCanonicalEnglishColumnTitle(VTS_TABLE_WBS, CStr(columnKeys(i)))
+        If Not mapCalc.Exists(calcFieldName) Then
+            Err.Raise vbObjectError + 9510, "CoreBridgePreCoreHarness", _
+                "Missing column in tbl_CALC: " & calcFieldName
+        End If
     Next i
 
 End Sub

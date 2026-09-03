@@ -1996,7 +1996,7 @@ Private Function GanttDrag_IsEligibleShape( _
     If dataRow > tblWBS.ListRows.Count Then Exit Function
 
     normalizedTaskType = UCase$(Trim$(CStr( _
-        tblWBS.DataBodyRange.Cells(dataRow, tblWBS.ListColumns("Task Type").Index).value)))
+        tblWBS.DataBodyRange.Cells(dataRow, SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_TASK_TYPE).Index).value)))
     If gMetricsEnabled Then gMetricCellsRead = gMetricCellsRead + 1
 
     If Not isMilestoneShape Then

@@ -204,14 +204,14 @@ Public Sub DrawConstraintMarkers_Gantt( _
         ganttRow = FIRST_TASK_ROW + r - 1
         If ws.rows(ganttRow).Hidden Then GoTo NextRow
 
-        idVal = Trim$(CStr(dataArr(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(dataArr(r, mapWBS(VTS_COL_ID))))
         If idVal = "" Then GoTo NextRow
         If Not constraintById.Exists(idVal) Then GoTo NextRow
 
-        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS("WBS"))))
+        wbsVal = NormalizeWBS(CStr(dataArr(r, mapWBS(VTS_COL_WBS))))
         If hasChildren.Exists(wbsVal) Then GoTo NextRow
 
-        isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r)
+        isLoE = TaskTypeRules_IsLevelOfEffortRow(dataArr, mapWBS, r, VTS_COL_TASK_TYPE)
         If isLoE Then GoTo NextRow
 
         vals = constraintById(idVal)
@@ -228,7 +228,7 @@ Public Sub DrawConstraintMarkers_Gantt( _
 
         If Not drawHardConstraints Then GoTo NextRow
 
-        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r)
+        isMilestone = TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, r, VTS_COL_TASK_TYPE)
 
         If isMilestone _
             And startType = "MUST START ON" _

@@ -1470,7 +1470,7 @@ Private Sub GetTaskTopEntryPoint( _
     Dim topEntryOffset As Double
 
     ganttRow = FIRST_TASK_ROW + dataRow - 1
-    idVal = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    idVal = Trim$(CStr(dataArr(dataRow, mapWBS(VTS_COL_ID))))
 
     startVal = GetRenderStartForCurrentScale(GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode))
     finishVal = GetRenderFinishForCurrentScale(GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode))
@@ -1964,12 +1964,12 @@ Private Function GanttDependency_IsPointMarkerTarget( _
     Dim startValue As Variant
     Dim finishValue As Variant
 
-    If TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, dataRow) Then
+    If TaskTypeRules_IsMilestoneRow(dataArr, mapWBS, dataRow, VTS_COL_TASK_TYPE) Then
         GanttDependency_IsPointMarkerTarget = True
         Exit Function
     End If
 
-    taskId = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    taskId = Trim$(CStr(dataArr(dataRow, mapWBS(VTS_COL_ID))))
     startValue = GetRenderStartForCurrentScale( _
         GanttLive_GetDisplayStart(taskId, baseById, testById, isTestMode))
     finishValue = GetRenderFinishForCurrentScale( _
@@ -2010,8 +2010,8 @@ Private Sub GetTaskAnchorPoint( _
     Dim timelineRightBound As Double
 
     ganttRow = FIRST_TASK_ROW + dataRow - 1
-    wbs = NormalizeWBS(CStr(dataArr(dataRow, mapWBS("WBS"))))
-    idVal = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    wbs = NormalizeWBS(CStr(dataArr(dataRow, mapWBS(VTS_COL_WBS))))
+    idVal = Trim$(CStr(dataArr(dataRow, mapWBS(VTS_COL_ID))))
 
     startVal = GetRenderStartForCurrentScale(GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode))
     finishVal = GetRenderFinishForCurrentScale(GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode))
@@ -2105,7 +2105,7 @@ Private Sub GetTaskFinishEntryPoint( _
     Dim timelineRightBound As Double
 
     ganttRow = FIRST_TASK_ROW + dataRow - 1
-    idVal = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    idVal = Trim$(CStr(dataArr(dataRow, mapWBS(VTS_COL_ID))))
 
     startVal = GetRenderStartForCurrentScale(GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode))
     finishVal = GetRenderFinishForCurrentScale(GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode))
@@ -2197,8 +2197,8 @@ Private Sub GetTaskAnchorPointBySide( _
     Dim timelineRightBound As Double
 
     ganttRow = FIRST_TASK_ROW + dataRow - 1
-    wbs = NormalizeWBS(CStr(dataArr(dataRow, mapWBS("WBS"))))
-    idVal = Trim$(CStr(dataArr(dataRow, mapWBS("ID"))))
+    wbs = NormalizeWBS(CStr(dataArr(dataRow, mapWBS(VTS_COL_WBS))))
+    idVal = Trim$(CStr(dataArr(dataRow, mapWBS(VTS_COL_ID))))
 
     startVal = GetRenderStartForCurrentScale(GanttLive_GetDisplayStart(idVal, baseById, testById, isTestMode))
     finishVal = GetRenderFinishForCurrentScale(GanttLive_GetDisplayFinish(idVal, baseById, testById, isTestMode))

@@ -36,6 +36,7 @@ Private gHotSpotStep As String
 '------------------------------------------------------------------------------
 Public Sub Refresh_Dashboard(Optional ByVal preserveSnapshotSelection As Boolean = False)
 
+    Dashboard_SetLanguage Settings_GetOwnerLanguage("DASHBOARD")
     If Dashboard_HasUsableLayout() Then
         Refresh_Dashboard_ContentOnly preserveSnapshotSelection
     Else
@@ -56,6 +57,7 @@ Public Sub Refresh_Dashboard_FullBuild(Optional ByVal preserveSnapshotSelection 
     Dim langCode As String
 
     On Error GoTo ErrHandler
+    Dashboard_SetLanguage Settings_GetOwnerLanguage("DASHBOARD")
     Set ws = Dashboard_EnsureSheet()
     If preserveSnapshotSelection Then
         fromLabel = CStr(ws.Range(DASH_FROM_CELL).value)
@@ -92,6 +94,7 @@ Public Sub Refresh_Dashboard_ContentOnly(Optional ByVal preserveSnapshotSelectio
     Dim toLabel As String
     Dim oldScreenUpdating As Boolean
     On Error GoTo ErrHandler
+    Dashboard_SetLanguage Settings_GetOwnerLanguage("DASHBOARD")
 
     If Not Dashboard_HasUsableLayout() Then
         Refresh_Dashboard_FullBuild preserveSnapshotSelection
@@ -160,15 +163,7 @@ End Sub
 ' EN: Toggles Dashboard Language state and updates related outputs.
 '------------------------------------------------------------------------------
 Public Sub Toggle_Dashboard_Language()
-
-    If Dashboard_IsFrench() Then
-        gDashboardLanguage = "EN"
-    Else
-        gDashboardLanguage = "FR"
-    End If
-
-    Refresh_Dashboard_TextsAndComparisonOnly
-
+    Settings_ToggleDashboardLanguage
 End Sub
 
 '------------------------------------------------------------------------------
@@ -183,6 +178,7 @@ Public Sub Reset_Dashboard()
     Dim oldEvents As Boolean
 
     On Error GoTo SafeExit
+    Dashboard_SetLanguage Settings_GetOwnerLanguage("DASHBOARD")
 
     oldScreenUpdating = Application.ScreenUpdating
     oldEvents = Application.EnableEvents
@@ -411,7 +407,7 @@ SafeExit:
     Exit Sub
 ErrHandler:
     Debug.Print "Refresh_Dashboard_TextsAndComparisonOnly error " & Err.Number & ": " & Err.Description
-    Resume SafeExit
+    Err.Raise Err.Number, "Refresh_Dashboard_TextsAndComparisonOnly", Err.Description
 End Sub
 
 '------------------------------------------------------------------------------
@@ -1700,7 +1696,7 @@ Private Sub Dashboard_RenderTopDelays(ByVal ws As Worksheet, ByVal tblWBS As Lis
     If tblWBS Is Nothing Then GoTo NoData
     If mapWBS Is Nothing Then GoTo NoData
     If tblWBS.DataBodyRange Is Nothing Then GoTo NoData
-    If Not mapWBS.Exists("Finish Variance") Then GoTo NoData
+    If Not mapWBS.Exists(VTS_COL_FINISH_VARIANCE) Then GoTo NoData
 
     arr = tblWBS.DataBodyRange.value
     For r = 1 To UBound(arr, 1)
@@ -3387,13 +3383,13 @@ Private Function Dashboard_BuildProgressById(ByVal tblWBS As ListObject, ByVal m
 
     If tblWBS Is Nothing Then GoTo CleanExit
     If tblWBS.DataBodyRange Is Nothing Then GoTo CleanExit
-    If Not mapWBS.Exists("ID") Then GoTo CleanExit
-    If Not mapWBS.Exists("% Progress") Then GoTo CleanExit
+    If Not mapWBS.Exists(VTS_COL_ID) Then GoTo CleanExit
+    If Not mapWBS.Exists(VTS_COL_PROGRESS_PERCENT) Then GoTo CleanExit
 
     arr = tblWBS.DataBodyRange.value
     For r = 1 To UBound(arr, 1)
-        idVal = CStr(GetCellValue(arr(r, mapWBS("ID"))))
-        If idVal <> "" Then progressById(idVal) = Dashboard_NormalizeProgress(GetCellValue(arr(r, mapWBS("% Progress"))))
+        idVal = CStr(GetCellValue(arr(r, mapWBS(VTS_COL_ID))))
+        If idVal <> "" Then progressById(idVal) = Dashboard_NormalizeProgress(GetCellValue(arr(r, mapWBS(VTS_COL_PROGRESS_PERCENT))))
     Next r
 
 CleanExit:
@@ -4821,18 +4817,10 @@ End Function
 
 Private Function Dashboard_ChartDateNumberFormat(Optional ByVal includeYear As Boolean = False) As String
 
-    If Dashboard_IsFrench() Then
-        If includeYear Then
-            Dashboard_ChartDateNumberFormat = "[$-fr-FR]dd mmm yyyy"
-        Else
-            Dashboard_ChartDateNumberFormat = "[$-fr-FR]dd mmm"
-        End If
+    If includeYear Then
+        Dashboard_ChartDateNumberFormat = Settings_GetDateNumberFormat()
     Else
-        If includeYear Then
-            Dashboard_ChartDateNumberFormat = "[$-en-US]dd mmm yyyy"
-        Else
-            Dashboard_ChartDateNumberFormat = "[$-en-US]dd mmm"
-        End If
+        Dashboard_ChartDateNumberFormat = Settings_GetCompactDateNumberFormat()
     End If
 
 End Function

@@ -54,23 +54,23 @@ Public Sub CreateScenarioPlanningFromCurrentScenario()
     Dim macroName As String
 
     answer = MsgBox( _
-        "Vous êtes actuellement en mode scénario." & vbCrLf & vbCrLf & _
-        "Le lock direct n'est pas autorisé en mode scénario." & vbCrLf & vbCrLf & _
-        "Voulez-vous créer un nouveau planning scénario basé sur l'état calculé actuel ?" & vbCrLf & vbCrLf & _
+        "Vous Ãªtes actuellement en mode scÃ©nario." & vbCrLf & vbCrLf & _
+        "Le lock direct n'est pas autorisÃ© en mode scÃ©nario." & vbCrLf & vbCrLf & _
+        "Voulez-vous crÃ©er un nouveau planning scÃ©nario basÃ© sur l'Ã©tat calculÃ© actuel ?" & vbCrLf & vbCrLf & _
         "Le nouveau fichier :" & vbCrLf & _
-        "* utilisera le scénario actuel comme nouvelle baseline ;" & vbCrLf & _
-        "* conservera les % Progress du scénario ;" & vbCrLf & _
+        "* utilisera le scÃ©nario actuel comme nouvelle baseline ;" & vbCrLf & _
+        "* conservera les % Progress du scÃ©nario ;" & vbCrLf & _
         "* videra Actual et Forecast ;" & vbCrLf & _
-        "* désactivera les contraintes ;" & vbCrLf & _
+        "* dÃ©sactivera les contraintes ;" & vbCrLf & _
         "* videra l'historique et les ACK ;" & vbCrLf & _
-        "* sortira du mode scénario.", _
+        "* sortira du mode scÃ©nario.", _
         vbQuestion + vbYesNo, _
-        "Créer un planning scénario")
+        "CrÃ©er un planning scÃ©nario")
 
     If answer <> vbYes Then Exit Sub
 
     If Trim$(ThisWorkbook.Path) = "" Then
-        MsgBox "Le fichier source doit être enregistré avant de créer un planning scénario.", vbExclamation, "Créer un planning scénario"
+        MsgBox "Le fichier source doit Ãªtre enregistrÃ© avant de crÃ©er un planning scÃ©nario.", vbExclamation, "CrÃ©er un planning scÃ©nario"
         Exit Sub
     End If
 
@@ -103,7 +103,7 @@ Fail:
     Application.ScreenUpdating = oldScreenUpdating
     Application.DisplayAlerts = oldAlerts
     Application.EnableEvents = oldEvents
-    MsgBox "Erreur pendant la création du planning scénario :" & vbCrLf & Err.Description, vbCritical, "Créer un planning scénario"
+    MsgBox "Erreur pendant la crÃ©ation du planning scÃ©nario :" & vbCrLf & Err.Description, vbCritical, "CrÃ©er un planning scÃ©nario"
 
 End Sub
 
@@ -187,7 +187,14 @@ Public Sub InitializeScenarioPlanningCopyFromCurrentWorkbook()
     Application.DisplayAlerts = False
 
     inputGuardToken = OpenAuthorizedWBSWriteScope( _
-        "ScenarioFork", Array("Baseline Start", "Baseline Duration", "Forecast Start", "Forecast Finish", "Actual Start", "Actual Finish", "% Progress"))
+        "ScenarioFork", Array( _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_BASELINE_START), _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_BASELINE_DURATION), _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FORECAST_START), _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FORECAST_FINISH), _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_ACTUAL_START), _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_ACTUAL_FINISH), _
+            SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_PROGRESS_PERCENT)))
     Application.EnableEvents = True
     ApplyScenarioBaselineToWBS_CurrentWorkbook
     Application.EnableEvents = False
@@ -218,7 +225,7 @@ CleanExit:
     Exit Sub
 
 Fail:
-    MsgBox "Erreur pendant l'initialisation du nouveau planning scénario :" & vbCrLf & Err.Description, vbCritical, "Planning scénario"
+    MsgBox "Erreur pendant l'initialisation du nouveau planning scÃ©nario :" & vbCrLf & Err.Description, vbCritical, "Planning scÃ©nario"
     Resume CleanExit
 
 End Sub
@@ -230,23 +237,23 @@ End Sub
 Private Function ScenarioForkCalculatedWBSColumns() As Variant
 
     ScenarioForkCalculatedWBSColumns = Array( _
-        "Baseline Finish", _
-        "Actual Duration", _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Calculated Duration", _
-        "Start Variance", _
-        "Finish Variance", _
-        "Duration Variance", _
-        "Driving Logic", _
-        "Critical Path", _
-        "Longest Path", _
-        "Critical Path REX", _
-        "Total Float", _
-        "Free Float", _
-        "Total Float REX", _
-        "Free Float REX", _
-        "Deadline Float")
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_START), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_FINISH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_START_VARIANCE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FINISH_VARIANCE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DURATION_VARIANCE), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DRIVING_LOGIC), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_LONGEST_PATH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CRITICAL_PATH_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FREE_FLOAT), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_TOTAL_FLOAT_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_FREE_FLOAT_REX), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_DEADLINE_FLOAT))
 
 End Function
 
@@ -287,6 +294,7 @@ Private Sub ApplyScenarioBaselineToWBS_CurrentWorkbook()
     Dim isScenarioLOE As Boolean
     Dim writeScenarioInputs As Boolean
     Dim hasValidScenarioBaseline As Boolean
+    Dim dateFormat As String
 
     Set wsWBS = ThisWorkbook.Worksheets(WBS_SHEET)
     Set tblWBS = wsWBS.ListObjects(WBS_TABLE)
@@ -299,7 +307,7 @@ Private Sub ApplyScenarioBaselineToWBS_CurrentWorkbook()
     arrWBS = tblWBS.DataBodyRange.value
 
     For r = 1 To UBound(arrWBS, 1)
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
         If idVal <> "" And scenarioById.Exists(idVal) Then
             scenarioValues = scenarioById(idVal)
             scenarioStart = scenarioValues(0)
@@ -312,26 +320,27 @@ Private Sub ApplyScenarioBaselineToWBS_CurrentWorkbook()
 
             If writeScenarioInputs Then
                 If hasValidScenarioBaseline Then
-                    tblWBS.DataBodyRange.cells(r, mapWBS("Baseline Start")).value = scenarioStart
-                    tblWBS.DataBodyRange.cells(r, mapWBS("Baseline Duration")).value = scenarioDuration
+                    tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_BASELINE_START)).value = scenarioStart
+                    tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_BASELINE_DURATION)).value = scenarioDuration
                 End If
-                If HasValue(scenarioProgress) Then tblWBS.DataBodyRange.cells(r, mapWBS("% Progress")).value = scenarioProgress
+                If HasValue(scenarioProgress) Then tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_PROGRESS_PERCENT)).value = scenarioProgress
             End If
 
-            tblWBS.DataBodyRange.cells(r, mapWBS("Forecast Start")).ClearContents
-            tblWBS.DataBodyRange.cells(r, mapWBS("Forecast Finish")).ClearContents
-            tblWBS.DataBodyRange.cells(r, mapWBS("Actual Start")).ClearContents
-            tblWBS.DataBodyRange.cells(r, mapWBS("Actual Finish")).ClearContents
+            tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_FORECAST_START)).ClearContents
+            tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_FORECAST_FINISH)).ClearContents
+            tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_ACTUAL_START)).ClearContents
+            tblWBS.DataBodyRange.cells(r, mapWBS(VTS_COL_ACTUAL_FINISH)).ClearContents
         End If
     Next r
 
-    tblWBS.ListColumns("Baseline Start").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    tblWBS.ListColumns("Baseline Duration").DataBodyRange.NumberFormat = "0"
-    tblWBS.ListColumns("Forecast Start").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    tblWBS.ListColumns("Forecast Finish").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    tblWBS.ListColumns("Actual Start").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    tblWBS.ListColumns("Actual Finish").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    tblWBS.ListColumns("% Progress").DataBodyRange.NumberFormat = "0%"
+    dateFormat = Settings_GetDateNumberFormat()
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_BASELINE_START).DataBodyRange.NumberFormat = dateFormat
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_BASELINE_DURATION).DataBodyRange.NumberFormat = "0"
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_FORECAST_START).DataBodyRange.NumberFormat = dateFormat
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_FORECAST_FINISH).DataBodyRange.NumberFormat = dateFormat
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ACTUAL_START).DataBodyRange.NumberFormat = dateFormat
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ACTUAL_FINISH).DataBodyRange.NumberFormat = dateFormat
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_PROGRESS_PERCENT).DataBodyRange.NumberFormat = "0%"
 
 End Sub
 
@@ -342,7 +351,9 @@ End Sub
 Private Sub RequireScenarioForkColumns(ByVal mapWBS As Object)
 
     Dim c As Variant
-    For Each c In Array("ID", "Baseline Start", "Baseline Duration", "Forecast Start", "Forecast Finish", "Actual Start", "Actual Finish", "% Progress")
+    For Each c In Array(VTS_COL_ID, VTS_COL_BASELINE_START, VTS_COL_BASELINE_DURATION, _
+                        VTS_COL_FORECAST_START, VTS_COL_FORECAST_FINISH, _
+                        VTS_COL_ACTUAL_START, VTS_COL_ACTUAL_FINISH, VTS_COL_PROGRESS_PERCENT)
         If Not mapWBS.Exists(CStr(c)) Then Err.Raise vbObjectError + 1290, , "Missing WBS column: " & CStr(c)
     Next c
 

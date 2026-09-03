@@ -57,10 +57,12 @@ Public Function CanonicalIdentityHarness_Smoke() As String
     CanonicalIdentityHarness_Trace "02 tables resolved"
     Set newColumns = CanonicalIdentity_BuildColumnMap(tblWBS)
     CanonicalIdentityHarness_Assert newColumns.Count = tblWBS.ListColumns.Count, "column map count"
-    For r = 1 To tblWBS.ListColumns.Count
-        CanonicalIdentityHarness_Assert newColumns.Exists(tblWBS.ListColumns(r).Name), "column map key"
-        CanonicalIdentityHarness_Assert CLng(newColumns(tblWBS.ListColumns(r).Name)) = r, "column map index"
-    Next r
+    For Each key In SchemaColumnKeys(VTS_TABLE_WBS)
+        CanonicalIdentityHarness_Assert newColumns.Exists(CStr(key)), "column map key"
+        CanonicalIdentityHarness_Assert _
+            CLng(newColumns(CStr(key))) = SchemaColumnIndex(tblWBS, VTS_TABLE_WBS, CStr(key)), _
+            "column map index"
+    Next key
 
     CanonicalIdentityHarness_Trace "03 columns parity"
     Set newWbsToId = CanonicalIdentity_BuildWbsToIdMap(tblWBS, newColumns)
@@ -68,8 +70,8 @@ Public Function CanonicalIdentityHarness_Smoke() As String
     If Not tblWBS.DataBodyRange Is Nothing Then
         arrWBS = tblWBS.DataBodyRange.value
         For r = 1 To UBound(arrWBS, 1)
-            wbsVal = NormalizeWBS(CStr(arrWBS(r, newColumns("WBS"))))
-            idVal = Trim$(CStr(arrWBS(r, newColumns("ID"))))
+            wbsVal = NormalizeWBS(CStr(arrWBS(r, newColumns(VTS_COL_WBS))))
+            idVal = Trim$(CStr(arrWBS(r, newColumns(VTS_COL_ID))))
             If wbsVal <> "" And idVal <> "" Then expected(wbsVal) = idVal
         Next r
     End If

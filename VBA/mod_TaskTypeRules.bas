@@ -65,17 +65,18 @@ End Function
 Public Function TaskTypeRules_IsMilestoneRow( _
     ByRef dataArr As Variant, _
     ByVal columnMap As Object, _
-    ByVal dataRow As Long) As Boolean
+    ByVal dataRow As Long, _
+    Optional ByVal taskTypeColumnKey As String = "Task Type") As Boolean
 
     On Error GoTo SafeExit
 
     If columnMap Is Nothing Then Exit Function
-    If Not columnMap.Exists("Task Type") Then Exit Function
+    If Not columnMap.Exists(taskTypeColumnKey) Then Exit Function
     If dataRow < LBound(dataArr, 1) Then Exit Function
     If dataRow > UBound(dataArr, 1) Then Exit Function
 
     TaskTypeRules_IsMilestoneRow = _
-        TaskTypeRules_IsMilestoneValue(dataArr(dataRow, columnMap("Task Type")))
+        TaskTypeRules_IsMilestoneValue(dataArr(dataRow, columnMap(taskTypeColumnKey)))
 
 SafeExit:
 End Function
@@ -87,17 +88,18 @@ End Function
 Public Function TaskTypeRules_IsLevelOfEffortRow( _
     ByRef dataArr As Variant, _
     ByVal columnMap As Object, _
-    ByVal dataRow As Long) As Boolean
+    ByVal dataRow As Long, _
+    Optional ByVal taskTypeColumnKey As String = "Task Type") As Boolean
 
     On Error GoTo SafeExit
 
     If columnMap Is Nothing Then Exit Function
-    If Not columnMap.Exists("Task Type") Then Exit Function
+    If Not columnMap.Exists(taskTypeColumnKey) Then Exit Function
     If dataRow < LBound(dataArr, 1) Then Exit Function
     If dataRow > UBound(dataArr, 1) Then Exit Function
 
     TaskTypeRules_IsLevelOfEffortRow = _
-        TaskTypeRules_IsLevelOfEffortValue(dataArr(dataRow, columnMap("Task Type")))
+        TaskTypeRules_IsLevelOfEffortValue(dataArr(dataRow, columnMap(taskTypeColumnKey)))
 
 SafeExit:
 End Function

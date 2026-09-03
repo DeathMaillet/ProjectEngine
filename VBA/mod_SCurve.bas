@@ -28,6 +28,8 @@ Private Const WBS_SHEET As String = "WBS"
 Private Const WBS_TABLE As String = "tbl_WBS"
 
 Private Const SCURVE_CHART_SIGNATURE_NAME As String = "_SCURVE_CHART_SOURCE_SIGNATURE"
+Private Const SCURVE_CHART_SIGNATURE_VERSION As String = "SCV1:"
+Private Const SCURVE_CHART_SIGNATURE_KEY_LENGTH As Long = 69
 
 Private gSCurveLanguage As String
 
@@ -166,7 +168,7 @@ Public Sub Run_SCurve_Engine()
 
         Dim errorText As String
 
-        taskId = Trim$(CStr(dataWBS(r, mapWBS("ID"))))
+        taskId = Trim$(CStr(dataWBS(r, mapWBS(VTS_COL_ID))))
         baselineStart = Empty
         baselineDuration = Empty
         baselineFinish = Empty
@@ -197,8 +199,8 @@ Public Sub Run_SCurve_Engine()
         taskWBS = Trim$(CStr(dataCalc(calcRow, mapCalc("WBS"))))
         isLeaf = Not hasChildren.Exists(NormalizeWBSLocal(taskWBS))
 
-        rawWeight = dataWBS(r, mapWBS("Weight (%)"))
-        progressVal = ProgressToDoubleLocal(dataWBS(r, mapWBS("% Progress")))
+        rawWeight = dataWBS(r, mapWBS(VTS_COL_WEIGHT_PERCENT))
+        progressVal = ProgressToDoubleLocal(dataWBS(r, mapWBS(VTS_COL_PROGRESS_PERCENT)))
 
         baselineStart = GetCellValue(dataCalc(calcRow, mapCalc("Baseline Start")))
         baselineDuration = GetCellValue(dataCalc(calcRow, mapCalc("Baseline Duration")))
@@ -333,7 +335,7 @@ NextPass1Row:
 
     If blockingErrorIds.Count > 0 Then
         SCurve_AddGroupedMessage consoleMessages, "STOP", blockingErrorIds, idToWbs, _
-            "DonnÈes bloquantes pour S-curve", "corriger les champs nÈcessaires avant recalcul", _
+            "Donn√©es bloquantes pour S-curve", "corriger les champs n√©cessaires avant recalcul", _
             "Blocking data for S-curve", "fix required fields before recalculation"
         SCurve_SafeEmptyState
         GoTo SafeExit
@@ -341,7 +343,7 @@ NextPass1Row:
 
     If includedIds.Count = 0 Then
         SCurve_AddConsoleMessage consoleMessages, "WARNING", _
-            "Aucune t‚che feuille exploitable pour la S-curve.", _
+            "Aucune t√¢che feuille exploitable pour la S-curve.", _
             "No valid leaf task available for S-curve.", _
             "SCURVE_NO_VALID_LEAF_TASK"
         SCurve_SafeEmptyState
@@ -350,7 +352,7 @@ NextPass1Row:
 
     If totalRawWeight <= 0 Then
         SCurve_AddConsoleMessage consoleMessages, "STOP", _
-            "La somme des poids exploitÈs pour la S-curve est nulle ou invalide.", _
+            "La somme des poids exploit√©s pour la S-curve est nulle ou invalide.", _
             "The total usable S-curve weight is zero or invalid."
         SCurve_SafeEmptyState
         GoTo SafeExit
@@ -366,7 +368,7 @@ NextPass1Row:
             "tasks are excluded from the S-curve; fill Weight (%) if needed")
 
         SCurve_AddGroupedMessage consoleMessages, "WARNING", missingWeightIds, idToWbs, _
-            "Poids manquant sur certaines t‚ches feuilles - non prises en compte dans la S-curve", "complÈter Weight (%) si nÈcessaire", _
+            "Poids manquant sur certaines t√¢ches feuilles - non prises en compte dans la S-curve", "compl√©ter Weight (%) si n√©cessaire", _
             "Missing weight on some leaf tasks - excluded from S-curve", "fill Weight (%) if needed", _
             True, _
             ackTokens
@@ -382,7 +384,7 @@ NextPass1Row:
             "tasks are excluded from the S-curve; remove Weight (%) if you want to avoid this warning")
 
         SCurve_AddGroupedMessage consoleMessages, "WARNING", excludedTaskTypeWithWeightIds, idToWbs, _
-            "Poids renseignÈ sur des Milestones ou Level of Effort - non pris en compte dans la S-curve", "supprimer le Weight (%) si vous voulez Èviter ce warning", _
+            "Poids renseign√© sur des Milestones ou Level of Effort - non pris en compte dans la S-curve", "supprimer le Weight (%) si vous voulez √©viter ce warning", _
             "Weight entered on Milestones or Level of Effort - excluded from S-curve", "remove Weight (%) if you want to avoid this warning", _
             True, _
             ackTokens
@@ -473,7 +475,7 @@ NextPass2Row:
 
     If allDates.Count = 0 Then
         SCurve_AddConsoleMessage consoleMessages, "STOP", _
-            "Aucune date exploitable pour gÈnÈrer la S-curve.", _
+            "Aucune date exploitable pour g√©n√©rer la S-curve.", _
             "No usable date found to generate the S-curve."
         SCurve_SafeEmptyState
         GoTo SafeExit
@@ -489,7 +491,7 @@ SafeExit:
 
         SCurve_AddConsoleMessage consoleMessages, "STOP", _
             "Erreur VBA dans Run_SCurve_Engine" & vbCrLf & _
-            "-> vÈrifier le dernier bloc modifiÈ dans mod_SCurve" & vbCrLf & _
+            "-> v√©rifier le dernier bloc modifi√© dans mod_SCurve" & vbCrLf & _
             "-> " & Err.Description, _
             "VBA error in Run_SCurve_Engine" & vbCrLf & _
             "-> check the last edited block in mod_SCurve" & vbCrLf & _
@@ -516,9 +518,9 @@ Private Sub ValidateSCurveSourceColumns(ByVal mapWBS As Object, ByVal mapCalc As
     Dim c As Variant
 
     requiredWbsCols = Array( _
-        "ID", _
-        "Weight (%)", _
-        "% Progress" _
+        VTS_COL_ID, _
+        VTS_COL_WEIGHT_PERCENT, _
+        VTS_COL_PROGRESS_PERCENT _
     )
 
     requiredCalcCols = Array( _
@@ -556,16 +558,16 @@ Private Sub ValidateSCurveOutputColumns(ByVal mapSCurve As Object)
     Dim c As Variant
 
     requiredCols = Array( _
-        "Date", _
-        "Daily Baseline", _
-        "Cumulative Baseline", _
-        "Daily Actualized", _
-        "Cumulative Actualized", _
-        "Daily Remaining Forecast", _
-        "Cumulative Remaining Forecast", _
-        "Calculated Curve Solid", _
-        "Calculated Curve Dashed", _
-        "Cumulative Actual" _
+        VTS_COL_DATE, _
+        VTS_COL_DAILY_BASELINE, _
+        VTS_COL_CUMULATIVE_BASELINE, _
+        VTS_COL_DAILY_ACTUALIZED, _
+        VTS_COL_CUMULATIVE_ACTUALIZED, _
+        VTS_COL_DAILY_REMAINING_FORECAST, _
+        VTS_COL_CUMULATIVE_REMAINING_FORECAST, _
+        VTS_COL_CALCULATED_CURVE_SOLID, _
+        VTS_COL_CALCULATED_CURVE_DASHED, _
+        VTS_COL_CUMULATIVE_ACTUAL _
     )
 
     For Each c In requiredCols
@@ -633,8 +635,8 @@ Private Sub BuildWBSParentMaps( _
     rowCount = UBound(dataWBS, 1)
 
     For r = 1 To rowCount
-        currentWBS = NormalizeWBSLocal(CStr(dataWBS(r, mapWBS("WBS"))))
-        taskId = Trim$(CStr(dataWBS(r, mapWBS("ID"))))
+        currentWBS = NormalizeWBSLocal(CStr(dataWBS(r, mapWBS(VTS_COL_WBS))))
+        taskId = Trim$(CStr(dataWBS(r, mapWBS(VTS_COL_ID))))
 
         If currentWBS <> "" Then
             parentWbs = GetParentWBS(currentWBS)
@@ -742,6 +744,7 @@ Private Sub WriteSCurveDailyTable( _
 
     Dim todaySerial As Long
     Dim currentDate As Long
+    Dim dateFormat As String
 
     Set perfScope = Profiler_BeginScope("WriteSCurveDailyTable", "Excel Table Write")
 
@@ -790,19 +793,19 @@ Private Sub WriteSCurveDailyTable( _
         cumulativeActualized = cumulativeActualized + dailyActualized
         cumulativeRemainingForecast = cumulativeRemainingForecast + dailyRemainingForecast
 
-        outArr(idx, mapSCurve("Date")) = CLng(sortedDates(idx))
-        outArr(idx, mapSCurve("Daily Baseline")) = dailyBaseline
-        outArr(idx, mapSCurve("Cumulative Baseline")) = cumulativeBaseline
-        outArr(idx, mapSCurve("Daily Actualized")) = dailyActualized
-        outArr(idx, mapSCurve("Cumulative Actualized")) = cumulativeActualized
-        outArr(idx, mapSCurve("Daily Remaining Forecast")) = dailyRemainingForecast
-        outArr(idx, mapSCurve("Cumulative Remaining Forecast")) = cumulativeRemainingForecast
-        outArr(idx, mapSCurve("Calculated Curve Solid")) = CVErr(xlErrNA)
-        outArr(idx, mapSCurve("Calculated Curve Dashed")) = CVErr(xlErrNA)
-        outArr(idx, mapSCurve("Cumulative Actual")) = CVErr(xlErrNA)
+        outArr(idx, mapSCurve(VTS_COL_DATE)) = CLng(sortedDates(idx))
+        outArr(idx, mapSCurve(VTS_COL_DAILY_BASELINE)) = dailyBaseline
+        outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_BASELINE)) = cumulativeBaseline
+        outArr(idx, mapSCurve(VTS_COL_DAILY_ACTUALIZED)) = dailyActualized
+        outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_ACTUALIZED)) = cumulativeActualized
+        outArr(idx, mapSCurve(VTS_COL_DAILY_REMAINING_FORECAST)) = dailyRemainingForecast
+        outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_REMAINING_FORECAST)) = cumulativeRemainingForecast
+        outArr(idx, mapSCurve(VTS_COL_CALCULATED_CURVE_SOLID)) = CVErr(xlErrNA)
+        outArr(idx, mapSCurve(VTS_COL_CALCULATED_CURVE_DASHED)) = CVErr(xlErrNA)
+        outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_ACTUAL)) = CVErr(xlErrNA)
 
         If currentDate <= todaySerial Then
-            outArr(idx, mapSCurve("Cumulative Actual")) = cumulativeActualized
+            outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_ACTUAL)) = cumulativeActualized
         End If
 
     Next idx
@@ -812,33 +815,34 @@ Private Sub WriteSCurveDailyTable( _
         currentDate = sortedDates(idx)
 
         If currentDate < todaySerial Then
-            outArr(idx, mapSCurve("Calculated Curve Solid")) = _
-                CDbl(outArr(idx, mapSCurve("Cumulative Actualized"))) + CDbl(outArr(idx, mapSCurve("Cumulative Remaining Forecast")))
+            outArr(idx, mapSCurve(VTS_COL_CALCULATED_CURVE_SOLID)) = _
+                CDbl(outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_ACTUALIZED))) + CDbl(outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_REMAINING_FORECAST)))
         Else
-            outArr(idx, mapSCurve("Calculated Curve Solid")) = CVErr(xlErrNA)
+            outArr(idx, mapSCurve(VTS_COL_CALCULATED_CURVE_SOLID)) = CVErr(xlErrNA)
         End If
 
         If currentDate >= todaySerial Then
-            outArr(idx, mapSCurve("Calculated Curve Dashed")) = _
-                CDbl(outArr(idx, mapSCurve("Cumulative Actualized"))) + CDbl(outArr(idx, mapSCurve("Cumulative Remaining Forecast")))
+            outArr(idx, mapSCurve(VTS_COL_CALCULATED_CURVE_DASHED)) = _
+                CDbl(outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_ACTUALIZED))) + CDbl(outArr(idx, mapSCurve(VTS_COL_CUMULATIVE_REMAINING_FORECAST)))
         Else
-            outArr(idx, mapSCurve("Calculated Curve Dashed")) = CVErr(xlErrNA)
+            outArr(idx, mapSCurve(VTS_COL_CALCULATED_CURVE_DASHED)) = CVErr(xlErrNA)
         End If
 
     Next idx
 
     tblSCurve.DataBodyRange.value = outArr
 
-    tblSCurve.ListColumns("Date").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    tblSCurve.ListColumns("Daily Baseline").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Cumulative Baseline").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Daily Actualized").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Cumulative Actualized").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Daily Remaining Forecast").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Cumulative Remaining Forecast").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Calculated Curve Solid").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Calculated Curve Dashed").DataBodyRange.NumberFormat = "0.00%"
-    tblSCurve.ListColumns("Cumulative Actual").DataBodyRange.NumberFormat = "0.00%"
+    dateFormat = Settings_GetDateNumberFormat()
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange.NumberFormat = dateFormat
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_DAILY_BASELINE).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_BASELINE).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_DAILY_ACTUALIZED).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_ACTUALIZED).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_DAILY_REMAINING_FORECAST).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_REMAINING_FORECAST).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_SOLID).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_DASHED).DataBodyRange.NumberFormat = "0.00%"
+    SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_ACTUAL).DataBodyRange.NumberFormat = "0.00%"
 
 End Sub
 
@@ -1044,12 +1048,12 @@ Public Sub SCurve_ApplyLanguage(Optional ByVal languageCode As String = "")
     ch.HasTitle = True
     ch.ChartTitle.Text = SCurve_L("S-Curve", "S-Curve")
 
-    If ch.SeriesCollection.Count >= 1 Then ch.SeriesCollection(1).Name = SCurve_L("RÈel journalier", "Daily Actualized")
-    If ch.SeriesCollection.Count >= 2 Then ch.SeriesCollection(2).Name = SCurve_L("PrÈvu restant journalier", "Daily Remaining Forecast")
-    If ch.SeriesCollection.Count >= 3 Then ch.SeriesCollection(3).Name = SCurve_L("RÈfÈrence", "Baseline")
-    If ch.SeriesCollection.Count >= 4 Then ch.SeriesCollection(4).Name = SCurve_L("CalculÈ", "Calculated")
-    If ch.SeriesCollection.Count >= 5 Then ch.SeriesCollection(5).Name = SCurve_L("PrÈvu", "Forecast")
-    If ch.SeriesCollection.Count >= 6 Then ch.SeriesCollection(6).Name = SCurve_L("RÈel", "Actual")
+    If ch.SeriesCollection.Count >= 1 Then ch.SeriesCollection(1).Name = SCurve_L("R√©el journalier", "Daily Actualized")
+    If ch.SeriesCollection.Count >= 2 Then ch.SeriesCollection(2).Name = SCurve_L("Pr√©vu restant journalier", "Daily Remaining Forecast")
+    If ch.SeriesCollection.Count >= 3 Then ch.SeriesCollection(3).Name = SCurve_L("R√©f√©rence", "Baseline")
+    If ch.SeriesCollection.Count >= 4 Then ch.SeriesCollection(4).Name = SCurve_L("Calcul√©", "Calculated")
+    If ch.SeriesCollection.Count >= 5 Then ch.SeriesCollection(5).Name = SCurve_L("Pr√©vu", "Forecast")
+    If ch.SeriesCollection.Count >= 6 Then ch.SeriesCollection(6).Name = SCurve_L("R√©el", "Actual")
 
     On Error Resume Next
     ch.Axes(xlCategory).TickLabels.NumberFormat = SCurve_DateAxisNumberFormat()
@@ -1058,10 +1062,7 @@ Public Sub SCurve_ApplyLanguage(Optional ByVal languageCode As String = "")
     Exit Sub
 
 ErrHandler:
-    CalcBridge_ShowSingleConsoleMessage _
-        "STOP", _
-        "Erreur dans SCurve_ApplyLanguage : " & Err.Description, _
-        "Error in SCurve_ApplyLanguage: " & Err.Description
+    Err.Raise Err.Number, "SCurve_ApplyLanguage", Err.Description
 
 End Sub
 
@@ -1129,7 +1130,7 @@ End Function
 
 Private Function SCurve_DateAxisNumberFormat() As String
 
-    SCurve_DateAxisNumberFormat = "dd/mm/yyyy"
+    SCurve_DateAxisNumberFormat = Settings_GetDateNumberFormat()
 
 End Function
 
@@ -1150,6 +1151,7 @@ Private Sub Create_SCurve_Chart()
 
 
     Set perfScope = Profiler_BeginScope("Create_SCurve_Chart", "Chart")
+    SCurve_SetLanguage Settings_GetOwnerLanguage("SCURVE")
 
     Set ws = ThisWorkbook.Worksheets(SCURVE_SHEET)
     Set tbl = ws.ListObjects(SCURVE_TABLE)
@@ -1175,9 +1177,9 @@ Private Sub Create_SCurve_Chart()
 
     Set s = ch.SeriesCollection.NewSeries
     With s
-        .Name = "Daily Actualized"
-        .XValues = tbl.ListColumns("Date").DataBodyRange
-        .Values = tbl.ListColumns("Daily Actualized").DataBodyRange
+        .Name = SCurve_L("R√©el journalier", "Daily Actualized")
+        .XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        .Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DAILY_ACTUALIZED).DataBodyRange
         .AxisGroup = xlPrimary
         .ChartType = xlColumnStacked
         .Format.Fill.ForeColor.RGB = RGB(31, 78, 121)
@@ -1186,9 +1188,9 @@ Private Sub Create_SCurve_Chart()
 
     Set s = ch.SeriesCollection.NewSeries
     With s
-        .Name = "Daily Remaining Forecast"
-        .XValues = tbl.ListColumns("Date").DataBodyRange
-        .Values = tbl.ListColumns("Daily Remaining Forecast").DataBodyRange
+        .Name = SCurve_L("Pr√©vu restant journalier", "Daily Remaining Forecast")
+        .XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        .Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DAILY_REMAINING_FORECAST).DataBodyRange
         .AxisGroup = xlPrimary
         .ChartType = xlColumnStacked
         .Format.Fill.ForeColor.RGB = RGB(191, 191, 191)
@@ -1197,9 +1199,9 @@ Private Sub Create_SCurve_Chart()
 
     Set s = ch.SeriesCollection.NewSeries
     With s
-        .Name = "Baseline"
-        .XValues = tbl.ListColumns("Date").DataBodyRange
-        .Values = tbl.ListColumns("Cumulative Baseline").DataBodyRange
+        .Name = SCurve_L("R√©f√©rence", "Baseline")
+        .XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        .Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_BASELINE).DataBodyRange
         .AxisGroup = xlSecondary
         .ChartType = xlLine
         .Format.Line.ForeColor.RGB = RGB(166, 166, 166)
@@ -1209,9 +1211,9 @@ Private Sub Create_SCurve_Chart()
 
     Set s = ch.SeriesCollection.NewSeries
     With s
-        .Name = "Calculated"
-        .XValues = tbl.ListColumns("Date").DataBodyRange
-        .Values = tbl.ListColumns("Calculated Curve Solid").DataBodyRange
+        .Name = SCurve_L("Calcul√©", "Calculated")
+        .XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        .Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_SOLID).DataBodyRange
         .AxisGroup = xlSecondary
         .ChartType = xlLine
         .Format.Line.ForeColor.RGB = RGB(68, 114, 196)
@@ -1221,9 +1223,9 @@ Private Sub Create_SCurve_Chart()
 
     Set s = ch.SeriesCollection.NewSeries
     With s
-        .Name = "Forecast"
-        .XValues = tbl.ListColumns("Date").DataBodyRange
-        .Values = tbl.ListColumns("Calculated Curve Dashed").DataBodyRange
+        .Name = SCurve_L("Pr√©vu", "Forecast")
+        .XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        .Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_DASHED).DataBodyRange
         .AxisGroup = xlSecondary
         .ChartType = xlLine
         .Format.Line.ForeColor.RGB = RGB(157, 195, 230)
@@ -1234,9 +1236,9 @@ Private Sub Create_SCurve_Chart()
 
     Set s = ch.SeriesCollection.NewSeries
     With s
-        .Name = "Actual"
-        .XValues = tbl.ListColumns("Date").DataBodyRange
-        .Values = tbl.ListColumns("Cumulative Actual").DataBodyRange
+        .Name = SCurve_L("R√©el", "Actual")
+        .XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        .Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_ACTUAL).DataBodyRange
         .AxisGroup = xlSecondary
         .ChartType = xlLine
         .Format.Line.ForeColor.RGB = RGB(31, 78, 121)
@@ -1244,12 +1246,10 @@ Private Sub Create_SCurve_Chart()
         .MarkerStyle = xlMarkerStyleNone
     End With
 
-    SCurveStoreChartSignature SCurveChartSourceSignature(tbl)
+    SCurveStoreChartSignature SCurveChartSourceKey(tbl)
 
     Format_SCurve_Chart ch
     DrawTodayVerticalLine ch
-    SCurve_ApplyLanguage
-
 End Sub
 
 
@@ -1266,7 +1266,7 @@ Private Sub Update_SCurve_Chart(ByVal ch As Chart)
 
     Dim tbl As ListObject
     Dim rebuildNeeded As Boolean
-    Dim sourceSignature As String
+    Dim sourceKey As String
 
     Set perfScope = Profiler_BeginScope("Update_SCurve_Chart", "Chart")
 
@@ -1302,17 +1302,15 @@ Private Sub Update_SCurve_Chart(ByVal ch As Chart)
         Exit Sub
     End If
 
-    sourceSignature = SCurveChartSourceSignature(tbl)
+    sourceKey = SCurveChartSourceKey(tbl)
 
-    If SCurveStoredChartSignature() <> sourceSignature Then
+    If SCurveStoredChartSignature() <> sourceKey Then
         SCurveAssignChartSeriesRanges ch, tbl
-        SCurveStoreChartSignature sourceSignature
+        SCurveStoreChartSignature sourceKey
     End If
 
     Format_SCurve_Chart ch
     DrawTodayVerticalLine ch
-    SCurve_ApplyLanguage
-
 End Sub
 
 
@@ -1326,24 +1324,25 @@ Private Sub SCurveAssignChartSeriesRanges(ByVal ch As Chart, ByVal tbl As ListOb
     Dim perfScope As clsPerfScope
 
     Set perfScope = Profiler_BeginScope("SCurveAssignChartSeriesRanges", "Chart")
+    Profiler_RecordCounter "SCurveChartSourceAssignments", 1
 
-    ch.SeriesCollection(1).XValues = tbl.ListColumns("Date").DataBodyRange
-    ch.SeriesCollection(1).Values = tbl.ListColumns("Daily Actualized").DataBodyRange
+    ch.SeriesCollection(1).XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+    ch.SeriesCollection(1).Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DAILY_ACTUALIZED).DataBodyRange
 
-    ch.SeriesCollection(2).XValues = tbl.ListColumns("Date").DataBodyRange
-    ch.SeriesCollection(2).Values = tbl.ListColumns("Daily Remaining Forecast").DataBodyRange
+    ch.SeriesCollection(2).XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+    ch.SeriesCollection(2).Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DAILY_REMAINING_FORECAST).DataBodyRange
 
-    ch.SeriesCollection(3).XValues = tbl.ListColumns("Date").DataBodyRange
-    ch.SeriesCollection(3).Values = tbl.ListColumns("Cumulative Baseline").DataBodyRange
+    ch.SeriesCollection(3).XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+    ch.SeriesCollection(3).Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_BASELINE).DataBodyRange
 
-    ch.SeriesCollection(4).XValues = tbl.ListColumns("Date").DataBodyRange
-    ch.SeriesCollection(4).Values = tbl.ListColumns("Calculated Curve Solid").DataBodyRange
+    ch.SeriesCollection(4).XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+    ch.SeriesCollection(4).Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_SOLID).DataBodyRange
 
-    ch.SeriesCollection(5).XValues = tbl.ListColumns("Date").DataBodyRange
-    ch.SeriesCollection(5).Values = tbl.ListColumns("Calculated Curve Dashed").DataBodyRange
+    ch.SeriesCollection(5).XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+    ch.SeriesCollection(5).Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_DASHED).DataBodyRange
 
-    ch.SeriesCollection(6).XValues = tbl.ListColumns("Date").DataBodyRange
-    ch.SeriesCollection(6).Values = tbl.ListColumns("Cumulative Actual").DataBodyRange
+    ch.SeriesCollection(6).XValues = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+    ch.SeriesCollection(6).Values = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_ACTUAL).DataBodyRange
 
 End Sub
 
@@ -1408,13 +1407,13 @@ End Sub
 Private Function SCurveChartSourceSignature(ByVal tbl As ListObject) As String
 
     SCurveChartSourceSignature = _
-        SCurveRangeSignature(tbl, "Date") & "|" & _
-        SCurveRangeSignature(tbl, "Daily Actualized") & "|" & _
-        SCurveRangeSignature(tbl, "Daily Remaining Forecast") & "|" & _
-        SCurveRangeSignature(tbl, "Cumulative Baseline") & "|" & _
-        SCurveRangeSignature(tbl, "Calculated Curve Solid") & "|" & _
-        SCurveRangeSignature(tbl, "Calculated Curve Dashed") & "|" & _
-        SCurveRangeSignature(tbl, "Cumulative Actual")
+        SCurveRangeSignature(tbl, VTS_COL_DATE) & "|" & _
+        SCurveRangeSignature(tbl, VTS_COL_DAILY_ACTUALIZED) & "|" & _
+        SCurveRangeSignature(tbl, VTS_COL_DAILY_REMAINING_FORECAST) & "|" & _
+        SCurveRangeSignature(tbl, VTS_COL_CUMULATIVE_BASELINE) & "|" & _
+        SCurveRangeSignature(tbl, VTS_COL_CALCULATED_CURVE_SOLID) & "|" & _
+        SCurveRangeSignature(tbl, VTS_COL_CALCULATED_CURVE_DASHED) & "|" & _
+        SCurveRangeSignature(tbl, VTS_COL_CUMULATIVE_ACTUAL)
 
 End Function
 
@@ -1423,14 +1422,25 @@ End Function
 ' EN: Returns the S Curve Range Signature reference without mutating input data.
 '------------------------------------------------------------------------------
 
-Private Function SCurveRangeSignature(ByVal tbl As ListObject, ByVal columnName As String) As String
+Private Function SCurveRangeSignature(ByVal tbl As ListObject, ByVal columnKey As String) As String
 
     Dim rng As Range
 
-    Set rng = tbl.ListColumns(columnName).DataBodyRange
-    SCurveRangeSignature = columnName & ":" & _
+    Set rng = SchemaListColumn(tbl, VTS_TABLE_SCURVE, columnKey).DataBodyRange
+    SCurveRangeSignature = columnKey & ":" & _
         rng.rows.Count & ":" & _
         rng.Address(RowAbsolute:=True, ColumnAbsolute:=True, ReferenceStyle:=xlA1, External:=True)
+
+End Function
+
+'------------------------------------------------------------------------------
+' FR: Construit la cle fixe versionnee representant la signature source brute.
+' EN: Builds the fixed versioned key representing the raw source signature.
+'------------------------------------------------------------------------------
+Private Function SCurveChartSourceKey(ByVal tbl As ListObject) As String
+
+    SCurveChartSourceKey = SCURVE_CHART_SIGNATURE_VERSION & _
+        DeterministicDigest_SHA256Hex(SCurveChartSourceSignature(tbl))
 
 End Function
 
@@ -1467,12 +1477,19 @@ End Function
 ' EN: Persists the S-Curve chart source signature used to avoid unnecessary rebuilds.
 '------------------------------------------------------------------------------
 
-Private Sub SCurveStoreChartSignature(ByVal signature As String)
+Private Sub SCurveStoreChartSignature(ByVal signatureKey As String)
 
     Dim nm As Name
     Dim refersToValue As String
 
-    refersToValue = "=""" & Replace(signature, """", """""") & """"
+    If Len(signatureKey) <> SCURVE_CHART_SIGNATURE_KEY_LENGTH Or _
+       Left$(signatureKey, Len(SCURVE_CHART_SIGNATURE_VERSION)) <> _
+            SCURVE_CHART_SIGNATURE_VERSION Then
+        Err.Raise vbObjectError + 2713, "SCurveStoreChartSignature", _
+            "Invalid fixed-length S-Curve chart signature key."
+    End If
+
+    refersToValue = "=""" & signatureKey & """"
 
     On Error Resume Next
     Set nm = ThisWorkbook.Names(SCURVE_CHART_SIGNATURE_NAME)
@@ -1594,7 +1611,7 @@ Public Sub DrawSCurveTodayVerticalLine( _
     If Len(Trim$(todayShapeName)) = 0 Then Exit Sub
 
     Set chartObj = ch.Parent
-    Set dateRange = tbl.ListColumns("Date").DataBodyRange
+    Set dateRange = SchemaListColumn(tbl, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
 
     todaySerial = CDbl(Date)
     dateCount = dateRange.rows.Count
@@ -1744,20 +1761,20 @@ Public Function SCurve_BuildDashboardProjection() As Object
     Set mapCalcSCurve = CanonicalIdentity_BuildColumnMap(tblCalcSCurve)
 
     If Not tblSCurve.DataBodyRange Is Nothing Then
-        If mapSCurve.Exists("Date") Then Set projection("DateRange") = tblSCurve.ListColumns("Date").DataBodyRange
-        If mapSCurve.Exists("Cumulative Baseline") Then Set projection("BaselineRange") = tblSCurve.ListColumns("Cumulative Baseline").DataBodyRange
-        If mapSCurve.Exists("Cumulative Actual") Then Set projection("ActualRange") = tblSCurve.ListColumns("Cumulative Actual").DataBodyRange
-        If mapSCurve.Exists("Calculated Curve Dashed") Then Set projection("ForecastRange") = tblSCurve.ListColumns("Calculated Curve Dashed").DataBodyRange
+        If mapSCurve.Exists(VTS_COL_DATE) Then Set projection("DateRange") = SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_DATE).DataBodyRange
+        If mapSCurve.Exists(VTS_COL_CUMULATIVE_BASELINE) Then Set projection("BaselineRange") = SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_BASELINE).DataBodyRange
+        If mapSCurve.Exists(VTS_COL_CUMULATIVE_ACTUAL) Then Set projection("ActualRange") = SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CUMULATIVE_ACTUAL).DataBodyRange
+        If mapSCurve.Exists(VTS_COL_CALCULATED_CURVE_DASHED) Then Set projection("ForecastRange") = SchemaListColumn(tblSCurve, VTS_TABLE_SCURVE, VTS_COL_CALCULATED_CURVE_DASHED).DataBodyRange
 
-        If mapSCurve.Exists("Date") And mapSCurve.Exists("Cumulative Baseline") Then
+        If mapSCurve.Exists(VTS_COL_DATE) And mapSCurve.Exists(VTS_COL_CUMULATIVE_BASELINE) Then
             arr = tblSCurve.DataBodyRange.value
             todaySerial = CLng(Date)
             For r = 1 To UBound(arr, 1)
-                dateValue = GetCellValue(arr(r, mapSCurve("Date")))
+                dateValue = GetCellValue(arr(r, mapSCurve(VTS_COL_DATE)))
                 If HasValue(dateValue) And (IsNumeric(dateValue) Or IsDate(dateValue)) Then
                     If IsDate(dateValue) Then dateNumber = CDbl(CDate(dateValue)) Else dateNumber = CDbl(dateValue)
                     If CLng(dateNumber) <= todaySerial Then
-                        value = GetCellValue(arr(r, mapSCurve("Cumulative Baseline")))
+                        value = GetCellValue(arr(r, mapSCurve(VTS_COL_CUMULATIVE_BASELINE)))
                         If IsNumeric(value) Then plannedProgress = CDbl(value)
                     End If
                 End If

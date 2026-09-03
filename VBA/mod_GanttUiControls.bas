@@ -115,6 +115,7 @@ Public Sub GanttUiControls_EnsureCanonical(ByVal ws As Worksheet)
 
     If ws Is Nothing Then Exit Sub
 
+    Gantt_SetLanguage Settings_GetOwnerLanguage("GANTT")
     EnsureGanttViewInitialized
 
     Set scenarioCell = ws.Range("B1")
@@ -132,13 +133,13 @@ Public Sub GanttUiControls_EnsureCanonical(ByVal ws As Worksheet)
     scenarioLeft = testLeft - GANTT_COMMAND_BUTTON_GAP - buttonWidth
     resetLeft = scenarioLeft - GANTT_COMMAND_BUTTON_GAP - buttonWidth
 
-    CreateOrUpdateGanttButton ws, BTN_RESET_NAME, BTN_RESET_CAPTION, _
+    CreateOrUpdateGanttButton ws, BTN_RESET_NAME, Gantt_Text("Réinitialiser", BTN_RESET_CAPTION), _
         "GanttSimulation_ResetToNormal", resetLeft, buttonTop, buttonWidth, buttonHeight
-    CreateOrUpdateGanttButton ws, BTN_SCENARIO_NAME, BTN_SCENARIO_CAPTION, _
+    CreateOrUpdateGanttButton ws, BTN_SCENARIO_NAME, Gantt_Text("Scénario", BTN_SCENARIO_CAPTION), _
         "Run_Gantt_Scenario_Engine", scenarioLeft, buttonTop, buttonWidth, buttonHeight
-    CreateOrUpdateGanttButton ws, BTN_TEST_NAME, BTN_TEST_CAPTION, _
+    CreateOrUpdateGanttButton ws, BTN_TEST_NAME, Gantt_Text("Test", BTN_TEST_CAPTION), _
         "Run_Gantt_Test_Engine", testLeft, buttonTop, buttonWidth, buttonHeight
-    CreateOrUpdateGanttButton ws, BTN_LOCK_NAME, BTN_LOCK_CAPTION, _
+    CreateOrUpdateGanttButton ws, BTN_LOCK_NAME, Gantt_Text("Verrouiller", BTN_LOCK_CAPTION), _
         "Run_Gantt_Lock_Changes", lockLeft, buttonTop, buttonWidth, buttonHeight
 
     'Legacy right-side labels are not part of the current control contract.
@@ -148,8 +149,6 @@ Public Sub GanttUiControls_EnsureCanonical(ByVal ws As Worksheet)
 
     BuildFixedHeaderToggles ws
     RefreshFixedHeaderToggleVisuals ws
-    Gantt_ApplyLanguage
-
 End Sub
 
 '------------------------------------------------------------------------------
@@ -219,15 +218,15 @@ Private Sub BuildFixedHeaderToggles(ByVal ws As Worksheet)
 
     CreateFixedHeaderToggle ws, _
         BTN_VIEW_LEFT_NAME, BTN_VIEW_BG_NAME, BTN_VIEW_KNOB_NAME, _
-        x, y, labelW1, "Detail / Summary", _
+        x, y, labelW1, Gantt_Text("Détail / Synthèse", "Detail / Summary"), _
         x + labelW1 + trackGap, y + 2, trackW, trackH, knobSize, _
         "Toggle_Gantt_View"
 
     x = x + labelW1 + trackGap + trackW + groupGap
 
-    CreateFixedHeaderTriToggle ws, _
+    ThreePositionControl_Ensure ws, _
         BTN_SCALE_LEFT_NAME, BTN_SCALE_BG_NAME, BTN_SCALE_KNOB_NAME, _
-        x, y, labelW3, "Day / Week / Month", _
+        x, y, labelW3, Gantt_Text("Jour / Sem. / Mois", "Day / Week / Month"), _
         x + labelW3 + trackGap, y + 2, analyticsTrackW, trackH, knobSize, _
         "Toggle_Gantt_Scale"
 
@@ -235,16 +234,16 @@ Private Sub BuildFixedHeaderToggles(ByVal ws As Worksheet)
 
     CreateFixedHeaderToggle ws, _
         BTN_CONSTRAINT_LEFT_NAME, BTN_CONSTRAINT_BG_NAME, BTN_CONSTRAINT_KNOB_NAME, _
-        x, y, labelW5, "Constraint", _
+        x, y, labelW5, Gantt_Text("Contrainte", "Constraint"), _
         x + labelW5 + trackGap, y + 2, trackW, trackH, knobSize, _
         "Toggle_Gantt_Constraints"
 
     x = ws.cells(TOGGLE_ROW_BOTTOM, COL_WBS).Left + 5
     y = ws.cells(TOGGLE_ROW_BOTTOM, COL_WBS).Top + 3
 
-    CreateFixedHeaderTriToggle ws, _
+    ThreePositionControl_Ensure ws, _
         BTN_CP_LEFT_NAME, BTN_CP_BG_NAME, BTN_CP_KNOB_NAME, _
-        x, y, labelW2, "None / Critical Path / Longest Path", _
+        x, y, labelW2, Gantt_Text("N/A / Chem. Crit. / Le plus long", "None / Critical Path / Longest Path"), _
         x + labelW2 + trackGap, y + 2, analyticsTrackW, trackH, knobSize, _
         "Toggle_Gantt_CriticalPath"
 
@@ -252,7 +251,7 @@ Private Sub BuildFixedHeaderToggles(ByVal ws As Worksheet)
 
     CreateFixedHeaderToggle ws, _
         BTN_CP_MULTI_LEFT_NAME, BTN_CP_MULTI_BG_NAME, BTN_CP_MULTI_KNOB_NAME, _
-        x, y, labelW4, "Single / Multiple Project", _
+        x, y, labelW4, Gantt_Text("Unique / Multi-projet", "Single / Multiple Project"), _
         x + labelW4 + trackGap, y + 2, trackW, trackH, knobSize, _
         "Toggle_CriticalPathMode_FromGantt"
 
@@ -350,7 +349,7 @@ End Sub
 ' FR: Met en forme ou met a jour un element UI/shape du GANTT.
 ' EN: Formats or updates a GANTT UI/shape element.
 '------------------------------------------------------------------------------
-Private Sub CreateFixedHeaderTriToggle( _
+Public Sub ThreePositionControl_Ensure( _
     ByVal ws As Worksheet, _
     ByVal labelName As String, _
     ByVal bgName As String, _
@@ -364,7 +363,8 @@ Private Sub CreateFixedHeaderTriToggle( _
     ByVal trackWidth As Double, _
     ByVal trackHeight As Double, _
     ByVal knobSize As Double, _
-    ByVal macroName As String)
+    ByVal macroName As String, _
+    Optional ByVal shapePlacement As XlPlacement = xlMoveAndSize)
 
     Dim shpLabel As Shape
     Dim shpBg As Shape
@@ -388,7 +388,7 @@ Private Sub CreateFixedHeaderTriToggle( _
         If .Line.Visible <> msoFalse Then .Line.Visible = msoFalse
         If .Fill.Visible <> msoFalse Then .Fill.Visible = msoFalse
         If CStr(.OnAction) <> "" Then .OnAction = ""
-        If .Placement <> xlMoveAndSize Then .Placement = xlMoveAndSize
+        If .Placement <> shapePlacement Then .Placement = shapePlacement
         If .TextFrame2.VerticalAnchor <> msoAnchorMiddle Then .TextFrame2.VerticalAnchor = msoAnchorMiddle
         If GanttUiControls_DoubleDiffers(.TextFrame2.MarginLeft, 0) Then .TextFrame2.MarginLeft = 0
         If GanttUiControls_DoubleDiffers(.TextFrame2.MarginRight, 0) Then .TextFrame2.MarginRight = 0
@@ -411,7 +411,7 @@ Private Sub CreateFixedHeaderTriToggle( _
         If .Visible <> msoTrue Then .Visible = msoTrue
         If GanttUiControls_DoubleDiffers(.Adjustments.item(1), 0.5) Then .Adjustments.item(1) = 0.5
         If CStr(.OnAction) <> macroName Then .OnAction = macroName
-        If .Placement <> xlMoveAndSize Then .Placement = xlMoveAndSize
+        If .Placement <> shapePlacement Then .Placement = shapePlacement
         If .Fill.Visible <> msoTrue Then .Fill.Visible = msoTrue
         If .Line.Visible <> msoTrue Then .Line.Visible = msoTrue
     End With
@@ -427,7 +427,7 @@ Private Sub CreateFixedHeaderTriToggle( _
         GanttUiControls_SetShapeGeometry shpKnob, .Left, knobTop, knobSize, knobSize
         If .Visible <> msoTrue Then .Visible = msoTrue
         If CStr(.OnAction) <> macroName Then .OnAction = macroName
-        If .Placement <> xlMoveAndSize Then .Placement = xlMoveAndSize
+        If .Placement <> shapePlacement Then .Placement = shapePlacement
         If .Fill.Visible <> msoTrue Then .Fill.Visible = msoTrue
         If .Line.Visible <> msoTrue Then .Line.Visible = msoTrue
     End With
@@ -534,14 +534,9 @@ Private Sub RefreshFixedHeaderTriToggleVisual( _
     ByVal knobName As String, _
     ByVal modeValue As String)
 
-    Dim shpBg As Shape
-    Dim shpKnob As Shape
     Dim normalizedMode As String
-    Dim knobLeft As Double
-    Dim knobTop As Double
-    Dim onColor As Long
+    Dim positionIndex As Long
 
-    onColor = RGB(68, 114, 196)
     normalizedMode = UCase$(Trim$(modeValue))
     If bgName = BTN_SCALE_BG_NAME Then
         If normalizedMode <> GANTT_SCALE_WEEK And normalizedMode <> GANTT_SCALE_MONTH Then
@@ -553,6 +548,40 @@ Private Sub RefreshFixedHeaderTriToggleVisual( _
         End If
     End If
 
+    Select Case normalizedMode
+        Case GANTT_ANALYTICS_PATH_LP, GANTT_SCALE_MONTH
+            positionIndex = 2
+        Case GANTT_ANALYTICS_PATH_CP, GANTT_SCALE_WEEK
+            positionIndex = 1
+        Case Else
+            positionIndex = 0
+    End Select
+
+    ThreePositionControl_Refresh ws, bgName, knobName, positionIndex
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Place un controle partage sur l'une de ses trois positions canoniques.
+' EN: Places a shared control on one of its three canonical positions.
+'------------------------------------------------------------------------------
+Public Sub ThreePositionControl_Refresh( _
+    ByVal ws As Worksheet, _
+    ByVal bgName As String, _
+    ByVal knobName As String, _
+    ByVal positionIndex As Long)
+
+    Dim shpBg As Shape
+    Dim shpKnob As Shape
+    Dim knobLeft As Double
+    Dim knobTop As Double
+    Dim onColor As Long
+
+    If ws Is Nothing Then Exit Sub
+    If positionIndex < 0 Or positionIndex > 2 Then positionIndex = 0
+
+    onColor = RGB(68, 114, 196)
+
     On Error Resume Next
     Set shpBg = ws.Shapes(bgName)
     Set shpKnob = ws.Shapes(knobName)
@@ -561,16 +590,16 @@ Private Sub RefreshFixedHeaderTriToggleVisual( _
     If shpBg Is Nothing Then Exit Sub
     If shpKnob Is Nothing Then Exit Sub
 
-    Select Case normalizedMode
-        Case GANTT_ANALYTICS_PATH_LP, GANTT_SCALE_MONTH
+    Select Case positionIndex
+        Case 2
             knobLeft = shpBg.Left + shpBg.Width - shpKnob.Width - 2
-        Case GANTT_ANALYTICS_PATH_CP, GANTT_SCALE_WEEK
+        Case 1
             knobLeft = shpBg.Left + ((shpBg.Width - shpKnob.Width) / 2)
         Case Else
             knobLeft = shpBg.Left + 2
     End Select
 
-    If normalizedMode = GANTT_ANALYTICS_PATH_NONE Or normalizedMode = GANTT_SCALE_DAY Then
+    If positionIndex = 0 Then
         If shpBg.Fill.ForeColor.RGB <> RGB(230, 230, 230) Then shpBg.Fill.ForeColor.RGB = RGB(230, 230, 230)
         If shpBg.Line.ForeColor.RGB <> RGB(170, 170, 170) Then shpBg.Line.ForeColor.RGB = RGB(170, 170, 170)
     Else

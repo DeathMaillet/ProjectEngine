@@ -284,19 +284,19 @@ Private Sub CoreBridgeAnalyticsHarness_PrepareTaskTypeRows( _
     ByVal mapCalc As Object, _
     ByVal rowIdx As Long)
 
-    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, "ID"
-    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, "WBS"
-    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, "Task Type"
-    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, "% Progress"
-    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, "Baseline Start"
+    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, VTS_COL_ID
+    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, VTS_COL_WBS
+    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, VTS_COL_TASK_TYPE
+    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, VTS_COL_PROGRESS_PERCENT
+    CoreBridgeAnalyticsHarness_RequireColumn mapWBS, VTS_COL_BASELINE_START
     CoreBridgeAnalyticsHarness_RequireColumn mapCalc, "ID"
     CoreBridgeAnalyticsHarness_RequireColumn mapCalc, "Task Type"
 
-    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS("ID")).Value = "CBH-LOE"
-    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS("WBS")).Value = "31.12.3"
-    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS("Task Type")).Value = "Level of Effort"
-    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS("% Progress")).Value = 0.5
-    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS("Baseline Start")).Value = DateSerial(2026, 3, 1)
+    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS(VTS_COL_ID)).Value = "CBH-LOE"
+    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS(VTS_COL_WBS)).Value = "31.12.3"
+    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS(VTS_COL_TASK_TYPE)).Value = "Level of Effort"
+    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS(VTS_COL_PROGRESS_PERCENT)).Value = 0.5
+    tblWBS.DataBodyRange.Cells(rowIdx, mapWBS(VTS_COL_BASELINE_START)).Value = DateSerial(2026, 3, 1)
 
     tblCalc.DataBodyRange.Cells(rowIdx, mapCalc("ID")).Value = "CBH-LOE"
     tblCalc.DataBodyRange.Cells(rowIdx, mapCalc("Task Type")).Value = "Level of Effort"

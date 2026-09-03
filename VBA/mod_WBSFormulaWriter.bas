@@ -33,6 +33,7 @@ Public Sub RestoreWBSFormulaColumns(ByVal tblWBS As ListObject)
     Dim writeScopeToken As Long
     Dim errorNumber As Long
     Dim errorDescription As String
+    Dim dateFormat As String
 
     Set perfScope = Profiler_BeginScope("RestoreWBSFormulaColumns", "Excel Formula Restore")
 
@@ -43,32 +44,33 @@ Public Sub RestoreWBSFormulaColumns(ByVal tblWBS As ListObject)
     If tblWBS Is Nothing Then Exit Sub
     If tblWBS.DataBodyRange Is Nothing Then Exit Sub
 
-    On Error Resume Next
-    Set baselineFinishCol = tblWBS.ListColumns("Baseline Finish")
-    Set actualDurationCol = tblWBS.ListColumns("Actual Duration")
-    Set calculatedDurationCol = tblWBS.ListColumns("Calculated Duration")
-    Err.Clear
-    On Error GoTo SafeExit
+    Set baselineFinishCol = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH)
+    Set actualDurationCol = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION)
+    Set calculatedDurationCol = SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION)
 
-    authorizedFields = Array("Baseline Finish", "Actual Duration", "Calculated Duration")
+    authorizedFields = Array( _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION), _
+        SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION))
+    dateFormat = Settings_GetDateNumberFormat()
     writeScopeToken = OpenAuthorizedWBSWriteScope( _
         "RestoreWBSFormulaColumns", authorizedFields)
 
     If Not baselineFinishCol Is Nothing Then
         RestoreWBSFormulaColumnIfNeeded baselineFinishCol, _
-            "=IF(OR([@[Baseline Start]]="""",[@[Baseline Duration]]=""""),"""",[@[Baseline Start]]+[@[Baseline Duration]]-1)", _
-            "dd/mm/yyyy"
+            WBSFormulaWriter_ExpectedFormula(VTS_COL_BASELINE_FINISH), _
+            dateFormat
     End If
 
     If Not actualDurationCol Is Nothing Then
         RestoreWBSFormulaColumnIfNeeded actualDurationCol, _
-            "=IF(OR([@[Actual Start]]="""",[@[Actual Finish]]=""""),"""",[@[Actual Finish]]-[@[Actual Start]]+1)", _
+            WBSFormulaWriter_ExpectedFormula(VTS_COL_ACTUAL_DURATION), _
             "0"
     End If
 
     If Not calculatedDurationCol Is Nothing Then
         RestoreWBSFormulaColumnIfNeeded calculatedDurationCol, _
-            "=IF(OR([@[Calculated Start]]="""",[@[Calculated Finish]]=""""),"""",[@[Calculated Finish]]-[@[Calculated Start]]+1)", _
+            WBSFormulaWriter_ExpectedFormula(VTS_COL_CALCULATED_DURATION), _
             "0"
     End If
 
@@ -88,6 +90,35 @@ SafeExit:
     End If
 
 End Sub
+
+Public Function WBSFormulaWriter_ExpectedFormula(ByVal columnKey As String) As String
+    Dim firstReference As String
+    Dim secondReference As String
+
+    Select Case columnKey
+        Case VTS_COL_BASELINE_FINISH
+            firstReference = SchemaStructuredRowReference(VTS_TABLE_WBS, VTS_COL_BASELINE_START)
+            secondReference = SchemaStructuredRowReference(VTS_TABLE_WBS, VTS_COL_BASELINE_DURATION)
+            WBSFormulaWriter_ExpectedFormula = _
+                "=IF(OR(" & firstReference & "=""""," & secondReference & "=""""),""""," & _
+                firstReference & "+" & secondReference & "-1)"
+        Case VTS_COL_ACTUAL_DURATION
+            firstReference = SchemaStructuredRowReference(VTS_TABLE_WBS, VTS_COL_ACTUAL_START)
+            secondReference = SchemaStructuredRowReference(VTS_TABLE_WBS, VTS_COL_ACTUAL_FINISH)
+            WBSFormulaWriter_ExpectedFormula = _
+                "=IF(OR(" & firstReference & "=""""," & secondReference & "=""""),""""," & _
+                secondReference & "-" & firstReference & "+1)"
+        Case VTS_COL_CALCULATED_DURATION
+            firstReference = SchemaStructuredRowReference(VTS_TABLE_WBS, VTS_COL_CALCULATED_START)
+            secondReference = SchemaStructuredRowReference(VTS_TABLE_WBS, VTS_COL_CALCULATED_FINISH)
+            WBSFormulaWriter_ExpectedFormula = _
+                "=IF(OR(" & firstReference & "=""""," & secondReference & "=""""),""""," & _
+                secondReference & "-" & firstReference & "+1)"
+        Case Else
+            Err.Raise vbObjectError + 5298, "WBSFormulaWriter_ExpectedFormula", _
+                "Unknown managed WBS formula column key '" & columnKey & "'."
+    End Select
+End Function
 
 '------------------------------------------------------------------------------
 ' FR: Reecrit une colonne de formule WBS uniquement si sa formule ou son format diverge.

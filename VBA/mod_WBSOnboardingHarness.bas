@@ -17,6 +17,17 @@ Option Explicit
 ' CALLBACKS EXTERNES / EXTERNAL CALLBACKS : Aucun / None
 '===============================================================================
 
+Public Function WBSOnboardingHarness_RunAndCapture() As String
+    On Error GoTo Failed
+    WBS_EnsureOnboardingGuide
+    WBSOnboardingHarness_RunAndCapture = "PASS"
+    Exit Function
+
+Failed:
+    WBSOnboardingHarness_RunAndCapture = _
+        "ERROR|" & CStr(Err.Number) & "|" & Err.Source & "|" & Err.Description
+End Function
+
 '------------------------------------------------------------------------------
 ' FR: Renomme temporairement Task Name et retourne le diagnostic produit par le contrat WBS.
 ' EN: Temporarily renames Task Name and returns the diagnostic produced by the WBS contract.
@@ -35,7 +46,7 @@ Public Function WBSOnboardingHarness_CaptureMissingColumnDiagnostic() As String
     Set ws = ThisWorkbook.Worksheets("WBS")
     Set tbl = ws.ListObjects("tbl_WBS")
 
-    tbl.ListColumns("Task Name").Name = "Task Name Missing"
+    SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TASK_NAME).Name = "Task Name Missing"
     renamedColumn = True
 
     On Error Resume Next

@@ -364,9 +364,9 @@ Public Sub CalcBridge_AppendTaskTypeWarnings( _
     If mapWBS Is Nothing Then Exit Sub
     If mapCalc Is Nothing Then Exit Sub
 
-    If Not mapWBS.Exists("ID") Then Exit Sub
-    If Not mapWBS.Exists("WBS") Then Exit Sub
-    If Not mapWBS.Exists("Task Type") Then Exit Sub
+    If Not mapWBS.Exists(VTS_COL_ID) Then Exit Sub
+    If Not mapWBS.Exists(VTS_COL_WBS) Then Exit Sub
+    If Not mapWBS.Exists(VTS_COL_TASK_TYPE) Then Exit Sub
 
     If Not mapCalc.Exists("ID") Then Exit Sub
     If Not mapCalc.Exists("Task Type") Then Exit Sub
@@ -385,41 +385,41 @@ Public Sub CalcBridge_AppendTaskTypeWarnings( _
 
     For r = 1 To UBound(arrWBS, 1)
 
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
         If idVal = "" Then GoTo NextRow
 
-        If mapWBS.Exists("Cal") Then
-            calVal = NormalizeCalendarType(arrWBS(r, mapWBS("Cal")))
+        If mapWBS.Exists(VTS_COL_CAL) Then
+            calVal = NormalizeCalendarType(arrWBS(r, mapWBS(VTS_COL_CAL)))
             If calVal = CALENDAR_5D Or calVal = CALENDAR_6D Then
                 If calcRowById.Exists(idVal) Then
                     calcRow = CLng(calcRowById(idVal))
                     If Core_IsSummaryRow(arrCalc, calcRow, mapCalc) Or _
-                       TaskTypeRules_IsLevelOfEffortRow(arrWBS, mapWBS, r) Or _
-                       TaskTypeRules_IsMilestoneRow(arrWBS, mapWBS, r) Then
+                       TaskTypeRules_IsLevelOfEffortRow(arrWBS, mapWBS, r, VTS_COL_TASK_TYPE) Or _
+                       TaskTypeRules_IsMilestoneRow(arrWBS, mapWBS, r, VTS_COL_TASK_TYPE) Then
                         warnIgnoredCal(idVal) = True
                     End If
-                ElseIf TaskTypeRules_IsLevelOfEffortRow(arrWBS, mapWBS, r) Or _
-                       TaskTypeRules_IsMilestoneRow(arrWBS, mapWBS, r) Then
+                ElseIf TaskTypeRules_IsLevelOfEffortRow(arrWBS, mapWBS, r, VTS_COL_TASK_TYPE) Or _
+                       TaskTypeRules_IsMilestoneRow(arrWBS, mapWBS, r, VTS_COL_TASK_TYPE) Then
                     warnIgnoredCal(idVal) = True
                 End If
             End If
         End If
-        If TaskTypeRules_IsLevelOfEffortRow(arrWBS, mapWBS, r) Then
+        If TaskTypeRules_IsLevelOfEffortRow(arrWBS, mapWBS, r, VTS_COL_TASK_TYPE) Then
 
-            If mapWBS.Exists("% Progress") Then
-                If HasValue(arrWBS(r, mapWBS("% Progress"))) Then warnLOEProgress(idVal) = True
+            If mapWBS.Exists(VTS_COL_PROGRESS_PERCENT) Then
+                If HasValue(arrWBS(r, mapWBS(VTS_COL_PROGRESS_PERCENT))) Then warnLOEProgress(idVal) = True
             End If
 
-            If (mapWBS.Exists("Baseline Start") And HasValue(arrWBS(r, mapWBS("Baseline Start")))) Or _
-               (mapWBS.Exists("Baseline Duration") And HasValue(arrWBS(r, mapWBS("Baseline Duration")))) Or _
-               (mapWBS.Exists("Baseline Finish") And HasValue(arrWBS(r, mapWBS("Baseline Finish")))) Then
+            If (mapWBS.Exists(VTS_COL_BASELINE_START) And HasValue(arrWBS(r, mapWBS(VTS_COL_BASELINE_START)))) Or _
+               (mapWBS.Exists(VTS_COL_BASELINE_DURATION) And HasValue(arrWBS(r, mapWBS(VTS_COL_BASELINE_DURATION)))) Or _
+               (mapWBS.Exists(VTS_COL_BASELINE_FINISH) And HasValue(arrWBS(r, mapWBS(VTS_COL_BASELINE_FINISH)))) Then
                 warnLOEBaseline(idVal) = True
             End If
 
-        ElseIf TaskTypeRules_IsMilestoneRow(arrWBS, mapWBS, r) Then
+        ElseIf TaskTypeRules_IsMilestoneRow(arrWBS, mapWBS, r, VTS_COL_TASK_TYPE) Then
 
-            If mapWBS.Exists("% Progress") Then
-                If CalcBridge_IsProgressStrictlyBetweenZeroAndOne(arrWBS(r, mapWBS("% Progress"))) Then
+            If mapWBS.Exists(VTS_COL_PROGRESS_PERCENT) Then
+                If CalcBridge_IsProgressStrictlyBetweenZeroAndOne(arrWBS(r, mapWBS(VTS_COL_PROGRESS_PERCENT))) Then
                     warnMilestoneProgress(idVal) = True
                 End If
             End If
@@ -1157,8 +1157,8 @@ Private Function BuildIdToWbsFromWBS(ByVal tblWBS As ListObject) As Object
     arrWBS = tblWBS.DataBodyRange.value
 
     For r = 1 To UBound(arrWBS, 1)
-        idVal = Trim$(CStr(arrWBS(r, mapWBS("ID"))))
-        wbsVal = NormalizeWBS(arrWBS(r, mapWBS("WBS")))
+        idVal = Trim$(CStr(arrWBS(r, mapWBS(VTS_COL_ID))))
+        wbsVal = NormalizeWBS(arrWBS(r, mapWBS(VTS_COL_WBS)))
 
         If idVal <> "" Then
             idToWbs(idVal) = wbsVal

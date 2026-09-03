@@ -107,7 +107,7 @@ Public Sub GanttLockService_RunLockChanges()
 
     If appliedChanges.Count = 0 Then
         GanttLive_AddBiConsoleMessage consoleMessages, "WARNING", _
-            "Aucune modification test à verrouiller.", _
+            "Aucune modification test Ã  verrouiller.", _
             "No test changes to lock."
 
         GanttLockTrace_Log "No changes: before CalcBridge_ShowPlanningConsole"
@@ -125,7 +125,7 @@ Public Sub GanttLockService_RunLockChanges()
     If GanttSimulation_HasErrors() Then
         GanttLockTrace_Log "GanttLive_CalcGanttTestHasErrors returned True"
         GanttLive_AddBiConsoleMessage consoleMessages, "WARNING", _
-            "Lock annulé : la simulation TEST préalable contient des erreurs." & vbCrLf & _
+            "Lock annulÃ© : la simulation TEST prÃ©alable contient des erreurs." & vbCrLf & _
             "-> corriger les valeurs test ou la logique amont avant de verrouiller.", _
             "Lock cancelled: the preliminary TEST simulation contains errors." & vbCrLf & _
             "-> fix test values or upstream logic before locking."
@@ -143,7 +143,7 @@ Public Sub GanttLockService_RunLockChanges()
 
     If appliedChanges.Count = 0 Then
         GanttLive_AddBiConsoleMessage consoleMessages, "WARNING", _
-            "Aucune modification test à verrouiller.", _
+            "Aucune modification test Ã  verrouiller.", _
             "No test changes to lock."
 
         GanttLockTrace_Log "No changes post-test: before CalcBridge_ShowPlanningConsole"
@@ -158,7 +158,7 @@ Public Sub GanttLockService_RunLockChanges()
 
     If simulatedById.Count = 0 Then
         GanttLive_AddBiConsoleMessage consoleMessages, "WARNING", _
-            "Lock annulé : aucun résultat simulé exploitable n'a été trouvé après le refresh TEST.", _
+            "Lock annulÃ© : aucun rÃ©sultat simulÃ© exploitable n'a Ã©tÃ© trouvÃ© aprÃ¨s le refresh TEST.", _
             "Lock cancelled: no usable simulated result was found after TEST refresh."
 
         GanttLockTrace_Log "No simulated results: before CalcBridge_ShowPlanningConsole"
@@ -203,11 +203,11 @@ Public Sub GanttLockService_RunLockChanges()
 
         If hasCalcErrors Then
             GanttLive_AddBiConsoleMessage consoleMessages, "WARNING", _
-                "Lock annulé : le calcul a détecté des erreurs. Les valeurs WBS d'origine ont été restaurées et les colonnes test ont été conservées.", _
+                "Lock annulÃ© : le calcul a dÃ©tectÃ© des erreurs. Les valeurs WBS d'origine ont Ã©tÃ© restaurÃ©es et les colonnes test ont Ã©tÃ© conservÃ©es.", _
                 "Lock cancelled: calculation found errors. Original WBS values were restored and test inputs were preserved."
         Else
             GanttLive_AddBiConsoleMessage consoleMessages, "WARNING", _
-                "Lock annulé : le recalcul réel ne correspond pas au résultat simulé retenu. Les valeurs WBS d'origine ont été restaurées et les colonnes test ont été conservées.", _
+                "Lock annulÃ© : le recalcul rÃ©el ne correspond pas au rÃ©sultat simulÃ© retenu. Les valeurs WBS d'origine ont Ã©tÃ© restaurÃ©es et les colonnes test ont Ã©tÃ© conservÃ©es.", _
                 "Lock cancelled: the real recalculation does not match the retained simulated result. Original WBS values were restored and test inputs were preserved."
         End If
 
@@ -222,7 +222,7 @@ Public Sub GanttLockService_RunLockChanges()
     GanttLockTrace_Log "Finalize returned"
 
     GanttLive_AddBiConsoleMessage consoleMessages, "INFO", _
-        "Lock appliqué avec succès.", _
+        "Lock appliquÃ© avec succÃ¨s.", _
         "Lock successfully applied."
 
     GanttLockTrace_Log "Success branch: before CalcBridge_ShowPlanningConsole"
@@ -245,7 +245,7 @@ SafeExit:
 
     GanttLive_AddBiConsoleMessage consoleMessages, "STOP", _
         "Erreur VBA dans Run_Gantt_Lock_Changes" & vbCrLf & _
-        "-> vérifier le dernier bloc modifié dans mod_GanttLive", _
+        "-> vÃ©rifier le dernier bloc modifiÃ© dans mod_GanttLive", _
         "VBA error in Run_Gantt_Lock_Changes" & vbCrLf & _
         "-> check the last edited block in mod_GanttLive"
 
@@ -271,12 +271,12 @@ Private Sub ValidateLockSourceColumns(ByVal mapWBS As Object, ByVal mapCalc As O
     Dim c As Variant
 
     reqWBS = Array( _
-        "ID", _
-        "Forecast Start", _
-        "Forecast Finish", _
-        "% Progress", _
-        "Calculated Start", _
-        "Calculated Finish" _
+        VTS_COL_ID, _
+        VTS_COL_FORECAST_START, _
+        VTS_COL_FORECAST_FINISH, _
+        VTS_COL_PROGRESS_PERCENT, _
+        VTS_COL_CALCULATED_START, _
+        VTS_COL_CALCULATED_FINISH _
     )
 
     reqCalc = Array( _
@@ -409,13 +409,13 @@ Private Function BackupWBSLockColumns(ByVal tblWBS As ListObject, ByVal mapWBS A
     arr = tblWBS.DataBodyRange.value
 
     For r = 1 To UBound(arr, 1)
-        idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
         If idVal <> "" Then
             d(idVal) = Array( _
-                GetCellValue(arr(r, mapWBS("Forecast Start"))), _
-                GetCellValue(arr(r, mapWBS("Forecast Finish"))), _
-                GetCellValue(arr(r, mapWBS("% Progress"))), _
-                NormalizeCalendarType(arr(r, mapWBS("Cal"))) _
+                GetCellValue(arr(r, mapWBS(VTS_COL_FORECAST_START))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_FORECAST_FINISH))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_PROGRESS_PERCENT))), _
+                NormalizeCalendarType(arr(r, mapWBS(VTS_COL_CAL))) _
             )
         End If
     Next r
@@ -441,15 +441,15 @@ Private Sub RestoreWBSLockColumns(ByVal tblWBS As ListObject, ByVal mapWBS As Ob
     If backup Is Nothing Then Exit Sub
 
     For r = 1 To tblWBS.ListRows.Count
-        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value))
+        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).value))
 
         If idVal <> "" Then
             If backup.Exists(idVal) Then
                 vals = backup(idVal)
 
-                tblWBS.DataBodyRange.Cells(r, mapWBS("Forecast Start")).value = vals(0)
-                tblWBS.DataBodyRange.Cells(r, mapWBS("Forecast Finish")).value = vals(1)
-                tblWBS.DataBodyRange.Cells(r, mapWBS("% Progress")).value = vals(2)
+                tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_FORECAST_START)).value = vals(0)
+                tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_FORECAST_FINISH)).value = vals(1)
+                tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_PROGRESS_PERCENT)).value = vals(2)
             End If
         End If
     Next r
@@ -482,7 +482,7 @@ Private Sub ApplyModifiedTestChangesToWBS( _
 
     For r = 1 To tblWBS.ListRows.Count
 
-        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value))
+        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).value))
 
         If idVal <> "" Then
             If changes.Exists(idVal) Then
@@ -497,18 +497,18 @@ Private Sub ApplyModifiedTestChangesToWBS( _
                 'A blank TEST Start means "do not lock/change Forecast Start",
                 'not "clear Forecast Start".
                 If hasTestStart Then
-                    tblWBS.DataBodyRange.Cells(r, mapWBS("Forecast Start")).value = vals(0)
+                    tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_FORECAST_START)).value = vals(0)
                 End If
 
                 'Important:
                 'A blank TEST Finish means "do not lock/change Forecast Finish",
                 'not "clear Forecast Finish".
                 If hasTestFinish Then
-                    tblWBS.DataBodyRange.Cells(r, mapWBS("Forecast Finish")).value = vals(1)
+                    tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_FORECAST_FINISH)).value = vals(1)
                 End If
 
                 If hasTestProgress Then
-                    tblWBS.DataBodyRange.Cells(r, mapWBS("% Progress")).value = vals(2)
+                    tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_PROGRESS_PERCENT)).value = vals(2)
                 End If
 
             End If
@@ -602,11 +602,13 @@ Private Sub RestoreGanttTestInputsFromBackup(ByVal wsGantt As Worksheet, ByVal b
     Dim vals As Variant
     Dim rowIndex As Long
     Dim key As Variant
+    Dim dateFormat As String
 
     If backup Is Nothing Then Exit Sub
     If backup.Count = 0 Then Exit Sub
 
     Set wbsToRow = CreateObject("Scripting.Dictionary")
+    dateFormat = Settings_GetDateNumberFormat()
 
     lastRow = GetLastGanttRow_Live(wsGantt)
     If lastRow < GANTT_FIRST_TASK_ROW Then Exit Sub
@@ -631,8 +633,8 @@ Private Sub RestoreGanttTestInputsFromBackup(ByVal wsGantt As Worksheet, ByVal b
             wsGantt.Cells(rowIndex, COL_TEST_FINISH).value = vals(1)
             wsGantt.Cells(rowIndex, COL_TEST_PROGRESS).value = vals(2)
 
-            wsGantt.Cells(rowIndex, COL_TEST_START).NumberFormat = "dd/mm/yyyy"
-            wsGantt.Cells(rowIndex, COL_TEST_FINISH).NumberFormat = "dd/mm/yyyy"
+            wsGantt.Cells(rowIndex, COL_TEST_START).NumberFormat = dateFormat
+            wsGantt.Cells(rowIndex, COL_TEST_FINISH).NumberFormat = dateFormat
             wsGantt.Cells(rowIndex, COL_TEST_PROGRESS).NumberFormat = "0%"
 
         End If
@@ -746,6 +748,8 @@ Private Sub GanttLive_FinalizeSuccessfulLock( _
     GanttLive_ClearTestRenderRequest
     GanttLive_ClearActiveSimulationMode
     SetGanttPreserveTestInputs False
+    GanttLocal_ForgetIds appliedChanges, "LockFinalizedTestState"
+    GanttRefresh_MarkRenderSignatureDirty "LockFinalizedTestState"
     GanttLockTrace_Log "Finalize helper: Ensure LOCAL_UPDATE start"
     If Not EnsureGanttForCurrentPlanning(GANTT_ENSURE_LOCAL_UPDATE, "GanttLock_FinalizeAppliedChanges") Then
         Err.Raise 5, "GanttLock_FinalizeAppliedChanges", "Gantt LOCK render did not reach READY state."
@@ -835,7 +839,7 @@ Private Function LockResultsMatchSimulatedResult( _
 
     For r = 1 To tblWBS.ListRows.Count
 
-        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value))
+        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).value))
 
         If idVal <> "" Then
             If simulatedById.Exists(idVal) Then
@@ -847,17 +851,17 @@ Private Function LockResultsMatchSimulatedResult( _
                 compareProgress = CBool(simVals(5))
 
                 If compareStart Then
-                    calcStartVal = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Start")).value)
+                    calcStartVal = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_START)).value)
                     If ValuesDiffer(calcStartVal, simVals(0)) Then Exit Function
                 End If
 
                 If compareFinish Then
-                    calcFinishVal = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Finish")).value)
+                    calcFinishVal = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_FINISH)).value)
                     If ValuesDiffer(calcFinishVal, simVals(1)) Then Exit Function
                 End If
 
                 If compareProgress Then
-                    progressVal = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("% Progress")).value)
+                    progressVal = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_PROGRESS_PERCENT)).value)
                     If ValuesDiffer(progressVal, simVals(2)) Then Exit Function
                 End If
 
@@ -869,5 +873,4 @@ Private Function LockResultsMatchSimulatedResult( _
     LockResultsMatchSimulatedResult = True
 
 End Function
-
 

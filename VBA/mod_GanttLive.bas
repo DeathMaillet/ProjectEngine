@@ -192,7 +192,7 @@ Public Function GanttLive_GetDisplayAnalyticsPath( _
     ByVal idVal As String, _
     ByVal testById As Object, _
     ByVal isTestMode As Boolean, _
-    ByVal pathColumnName As String) As String
+    ByVal pathColumnKey As String) As String
 
     Dim renderMode As String
 
@@ -204,10 +204,10 @@ Public Function GanttLive_GetDisplayAnalyticsPath( _
     If Not testById.Exists(idVal) Then Exit Function
     If UBound(testById(idVal)) < 10 Then Exit Function
 
-    Select Case pathColumnName
-        Case "Critical Path"
+    Select Case pathColumnKey
+        Case VTS_COL_CRITICAL_PATH
             GanttLive_GetDisplayAnalyticsPath = CStr(testById(idVal)(9))
-        Case "Longest Path"
+        Case VTS_COL_LONGEST_PATH
             GanttLive_GetDisplayAnalyticsPath = CStr(testById(idVal)(10))
     End Select
 
@@ -264,15 +264,15 @@ Public Function GanttLive_BuildBaseByIdMap() As Object
     arr = tbl.DataBodyRange.value
 
     For r = 1 To UBound(arr, 1)
-        idVal = Trim$(CStr(arr(r, mapWBS("ID"))))
+        idVal = Trim$(CStr(arr(r, mapWBS(VTS_COL_ID))))
 
         If idVal <> "" Then
             d(idVal) = Array( _
-                GetCellValue(arr(r, mapWBS("Calculated Start"))), _
-                GetCellValue(arr(r, mapWBS("Calculated Finish"))), _
-                GetCellValue(arr(r, mapWBS("Calculated Duration"))), _
-                GetCellValue(arr(r, mapWBS("% Progress"))), _
-                NormalizeCalendarType(arr(r, mapWBS("Cal"))) _
+                GetCellValue(arr(r, mapWBS(VTS_COL_CALCULATED_START))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_CALCULATED_FINISH))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_CALCULATED_DURATION))), _
+                GetCellValue(arr(r, mapWBS(VTS_COL_PROGRESS_PERCENT))), _
+                NormalizeCalendarType(arr(r, mapWBS(VTS_COL_CAL))) _
             )
         End If
     Next r

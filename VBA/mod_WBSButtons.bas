@@ -19,22 +19,21 @@ Option Explicit
 
 
 Private Const RESET_PLANNING_EMPTY_WBS_ROWS As Long = 5
-Private Const WBS_ONBOARDING_HELP_ROW As Long = 3
-Private Const WBS_LOCALIZED_LABEL_ROW As Long = 4
-Private Const WBS_CANONICAL_HEADER_ROW As Long = 5
-Private Const WBS_FIRST_DATA_ROW As Long = 6
 
 Private Const WBS_ONBOARDING_FONT_NAME As String = "Aptos Narrow"
 Private Const WBS_ONBOARDING_FONT_SIZE As Double = 8
-Private Const WBS_ONBOARDING_ROW_HEIGHT As Double = 13.8
-Private Const WBS_QUICK_START_FR_LINE_1 As String = "DÈmarrage rapide : renseignez les colonnes portant le statut Requis. Les colonnes Optionnel peuvent rester vides et les colonnes CalculÈ sont renseignÈes automatiquement."
-Private Const WBS_QUICK_START_FR_LINE_2 As String = "* Predecessors WBS, Baseline Start et Baseline Duration doivent ensemble fournir suffisamment d'informations pour positionner la t‚che sur la chronologie."
+Private Const WBS_ONBOARDING_ROW_HEIGHT As Double = 14
+Private Const WBS_QUICK_START_FR_LINE_1 As String = "D√©marrage rapide : renseignez les colonnes portant le statut Requis. Les colonnes Optionnel peuvent rester vides et les colonnes Calcul√© sont renseign√©es automatiquement."
+Private Const WBS_QUICK_START_FR_LINE_2 As String = "* Predecessors WBS, Baseline Start et Baseline Duration doivent ensemble fournir suffisamment d'informations pour positionner la t√¢che sur la chronologie."
 Private Const WBS_QUICK_START_EN_LINE_1 As String = "Quick Start: Fill in the columns marked Required. Optional columns may be left blank, while Calculated columns are populated automatically."
 Private Const WBS_QUICK_START_EN_LINE_2 As String = "* Predecessors WBS, Baseline Start and Baseline Duration must together provide enough information to position the task on the timeline."
 Private gWBSLanguage As String
 Private gWBSOnboardingLocalizedCheckCount As Long
 Private gWBSOnboardingLocalizedRebuildCount As Long
 Private gWBSOnboardingStructuralMutationCount As Long
+Private gWBSOnboardingThreadedReadCount As Long
+Private gWBSOnboardingThreadedAddCount As Long
+Private gWBSOnboardingThreadedClearCount As Long
 '------------------------------------------------------------------------------
 ' FR: Traite la reference Armageddon sans modifier les donnees d'entree.
 ' EN: Handles the Armageddon reference without mutating input data.
@@ -192,15 +191,15 @@ Private Sub ResetPlanning_ApplyWBSInputSetup(ByVal tbl As ListObject)
     If tbl Is Nothing Then Exit Sub
     If tbl.DataBodyRange Is Nothing Then Exit Sub
 
-    ResetPlanning_ApplyListValidation tbl, "Task Type", "Task,Milestone,Level of Effort", _
+    ResetPlanning_ApplyListValidation tbl, VTS_COL_TASK_TYPE, "Task,Milestone,Level of Effort", _
         "Task Type", "Choose: Task, Milestone, or Level of Effort.", _
         "Invalid Task Type", "Allowed values: Task, Milestone, Level of Effort."
 
-    ResetPlanning_ApplyListValidation tbl, "S", "Y,N", _
+    ResetPlanning_ApplyListValidation tbl, VTS_COL_S, "Y,N", _
         "S", "Choose Y to show in Summary, N to hide.", _
         "Invalid S", "Allowed values: blank, Y, N."
 
-    ResetPlanning_ApplyListValidation tbl, "Cal", CALENDAR_7D & "," & CALENDAR_6D & "," & CALENDAR_5D, _
+    ResetPlanning_ApplyListValidation tbl, VTS_COL_CAL, CALENDAR_7D & "," & CALENDAR_6D & "," & CALENDAR_5D, _
         "Cal", "Choose: 7j/7, 6j/7, or 5j/7.", _
         "Invalid Cal", "Allowed values: blank, 7j/7, 6j/7, 5j/7."
 
@@ -217,7 +216,7 @@ End Sub
 
 Private Sub ResetPlanning_ApplyListValidation( _
     ByVal tbl As ListObject, _
-    ByVal columnName As String, _
+    ByVal columnKey As String, _
     ByVal listFormula As String, _
     ByVal inputTitle As String, _
     ByVal inputMessage As String, _
@@ -226,8 +225,8 @@ Private Sub ResetPlanning_ApplyListValidation( _
 
     Dim rng As Range
 
-    If Not WBS_TableHasColumn(tbl, columnName) Then Exit Sub
-    Set rng = tbl.ListColumns(columnName).DataBodyRange
+    If Not WBS_TableHasSchemaColumn(tbl, columnKey) Then Exit Sub
+    Set rng = SchemaListColumn(tbl, VTS_TABLE_WBS, columnKey).DataBodyRange
     If rng Is Nothing Then Exit Sub
 
     rng.NumberFormat = "@"
@@ -256,17 +255,21 @@ End Sub
 
 Private Sub ResetPlanning_ApplyWBSFormats(ByVal tbl As ListObject)
 
-    If WBS_TableHasColumn(tbl, "WBS") Then tbl.ListColumns("WBS").DataBodyRange.NumberFormat = "@"
-    If WBS_TableHasColumn(tbl, "ID") Then tbl.ListColumns("ID").DataBodyRange.NumberFormat = "0"
-    If WBS_TableHasColumn(tbl, "Baseline Start") Then tbl.ListColumns("Baseline Start").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    If WBS_TableHasColumn(tbl, "Baseline Finish") Then tbl.ListColumns("Baseline Finish").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    If WBS_TableHasColumn(tbl, "Actual Start") Then tbl.ListColumns("Actual Start").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    If WBS_TableHasColumn(tbl, "Actual Finish") Then tbl.ListColumns("Actual Finish").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    If WBS_TableHasColumn(tbl, "Forecast Start") Then tbl.ListColumns("Forecast Start").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    If WBS_TableHasColumn(tbl, "Forecast Finish") Then tbl.ListColumns("Forecast Finish").DataBodyRange.NumberFormat = "dd/mm/yyyy"
-    If WBS_TableHasColumn(tbl, "Baseline Duration") Then tbl.ListColumns("Baseline Duration").DataBodyRange.NumberFormat = "0"
-    If WBS_TableHasColumn(tbl, "Actual Duration") Then tbl.ListColumns("Actual Duration").DataBodyRange.NumberFormat = "0"
-    If WBS_TableHasColumn(tbl, "Calculated Duration") Then tbl.ListColumns("Calculated Duration").DataBodyRange.NumberFormat = "0"
+    Dim dateFormat As String
+
+    dateFormat = Settings_GetDateNumberFormat()
+
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_WBS) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_WBS).DataBodyRange.NumberFormat = "@"
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_ID) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ID).DataBodyRange.NumberFormat = "0"
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_BASELINE_START) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_START).DataBodyRange.NumberFormat = dateFormat
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_BASELINE_FINISH) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_FINISH).DataBodyRange.NumberFormat = dateFormat
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_ACTUAL_START) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_START).DataBodyRange.NumberFormat = dateFormat
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_ACTUAL_FINISH) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_FINISH).DataBodyRange.NumberFormat = dateFormat
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_FORECAST_START) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FORECAST_START).DataBodyRange.NumberFormat = dateFormat
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_FORECAST_FINISH) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_FORECAST_FINISH).DataBodyRange.NumberFormat = dateFormat
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_BASELINE_DURATION) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_BASELINE_DURATION).DataBodyRange.NumberFormat = "0"
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_ACTUAL_DURATION) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ACTUAL_DURATION).DataBodyRange.NumberFormat = "0"
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_CALCULATED_DURATION) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_CALCULATED_DURATION).DataBodyRange.NumberFormat = "0"
 
 End Sub
 
@@ -277,7 +280,7 @@ End Sub
 '
 ' Console routing:
 ' - confirmation utilisateur autorisee pour Reset Planning
-' - les erreurs sont envoyÈes vers frmPlanningMessages
+' - les erreurs sont envoy√©es vers frmPlanningMessages
 '=====================================================
 
 '------------------------------------------------------------------------------
@@ -313,7 +316,6 @@ Private Sub Ensure_WBS_Onboarding_Guide( _
     Dim firstDataRow As Long
     Dim oldEvents As Boolean
     Dim oldScreenUpdating As Boolean
-    Dim insertedRow As Boolean
     Dim renamedLegacyProjectColumn As Boolean
     Dim structureNeedsMutation As Boolean
     Dim errorNumber As Long
@@ -329,14 +331,14 @@ Private Sub Ensure_WBS_Onboarding_Guide( _
     Set tbl = ws.ListObjects("tbl_WBS")
     Set statuses = WBS_Onboarding_BuildStatusMap()
 
-    If WBS_TableHasColumn(tbl, "Project") And WBS_TableHasColumn(tbl, "Package") Then
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_PROJECT) And WBS_TableHasPhysicalColumn(tbl, "Package") Then
         Err.Raise vbObjectError + 2329, "Ensure_WBS_Onboarding_Guide", _
             "Ambiguous WBS schema: both Project and legacy Package columns are present."
     End If
 
     For Each key In statuses.Keys
-        If Not WBS_TableHasColumn(tbl, CStr(key)) Then
-            If CStr(key) <> "Project" Or Not WBS_TableHasColumn(tbl, "Package") Then
+        If Not WBS_TableHasSchemaColumn(tbl, CStr(key)) Then
+            If CStr(key) <> VTS_COL_PROJECT Or Not WBS_TableHasPhysicalColumn(tbl, "Package") Then
                 If missingColumns <> "" Then missingColumns = missingColumns & ", "
                 missingColumns = missingColumns & CStr(key)
             End If
@@ -349,14 +351,12 @@ Private Sub Ensure_WBS_Onboarding_Guide( _
     End If
 
     headerRow = tbl.HeaderRowRange.Row
-    If headerRow <> WBS_LOCALIZED_LABEL_ROW And headerRow <> WBS_CANONICAL_HEADER_ROW Then
+    If headerRow <= 1 Then
         Err.Raise vbObjectError + 2331, "Ensure_WBS_Onboarding_Guide", _
-            "Unexpected tbl_WBS header row. Expected 4 (legacy) or 5 (v1.0.1), found " & CStr(headerRow) & "."
+            "tbl_WBS has no row available immediately above its physical header for onboarding."
     End If
 
-    structureNeedsMutation = _
-        (headerRow = WBS_LOCALIZED_LABEL_ROW) Or _
-        (Not WBS_TableHasColumn(tbl, "Project"))
+    structureNeedsMutation = Not WBS_TableHasSchemaColumn(tbl, VTS_COL_PROJECT)
 
     If Not structureNeedsMutation Then
         structureNeedsMutation = Not WBS_Onboarding_StructureIsCurrent(ws, tbl, statuses)
@@ -366,14 +366,9 @@ Private Sub Ensure_WBS_Onboarding_Guide( _
         Application.EnableEvents = False
         Application.ScreenUpdating = False
 
-        If Not WBS_TableHasColumn(tbl, "Project") Then
-            tbl.ListColumns("Package").Name = "Project"
+        If Not WBS_TableHasSchemaColumn(tbl, VTS_COL_PROJECT) Then
+            tbl.ListColumns("Package").Name = SchemaCurrentColumnTitle(VTS_TABLE_WBS, VTS_COL_PROJECT)
             renamedLegacyProjectColumn = True
-        End If
-
-        If headerRow = WBS_LOCALIZED_LABEL_ROW Then
-            ws.Rows(WBS_ONBOARDING_HELP_ROW).Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
-            insertedRow = True
         End If
 
         Set tbl = ws.ListObjects("tbl_WBS")
@@ -382,28 +377,22 @@ Private Sub Ensure_WBS_Onboarding_Guide( _
             gWBSOnboardingStructuralMutationCount + 1
     End If
 
-    If tbl.HeaderRowRange.Row <> WBS_CANONICAL_HEADER_ROW Then
-        Err.Raise vbObjectError + 2332, "Ensure_WBS_Onboarding_Guide", _
-            "tbl_WBS header migration failed. Expected row 5, found " & CStr(tbl.HeaderRowRange.Row) & "."
-    End If
-
     If Not tbl.DataBodyRange Is Nothing Then
         firstDataRow = tbl.DataBodyRange.Row
-        If firstDataRow <> WBS_FIRST_DATA_ROW Then
+        If firstDataRow <> tbl.HeaderRowRange.Row + 1 Then
             Err.Raise vbObjectError + 2333, "Ensure_WBS_Onboarding_Guide", _
-                "Unexpected first tbl_WBS data row. Expected 6, found " & CStr(firstDataRow) & "."
+                "Unexpected first tbl_WBS data row. Expected the row immediately below the physical header, found " & _
+                CStr(firstDataRow) & "."
         End If
-    End If
-
-    If Application.WorksheetFunction.CountA(ws.Rows(WBS_LOCALIZED_LABEL_ROW)) = 0 Then
-        Err.Raise vbObjectError + 2334, "Ensure_WBS_Onboarding_Guide", _
-            "Localized WBS labels are missing from row 4 after migration."
     End If
 
     Application.ScreenUpdating = oldScreenUpdating
     Application.EnableEvents = oldEvents
 
-    If applyLocalizedContent Then WBS_ApplyLanguage
+    If applyLocalizedContent Then
+        WBS_SetLanguage Settings_GetOwnerLanguage("WBS")
+        WBS_Onboarding_ApplyLocalizedContent ws, tbl
+    End If
     Exit Sub
 
 ErrHandler:
@@ -413,10 +402,9 @@ ErrHandler:
 
     On Error Resume Next
     Application.EnableEvents = False
-    If insertedRow Then ws.Rows(WBS_ONBOARDING_HELP_ROW).Delete Shift:=xlUp
     If renamedLegacyProjectColumn Then
         Set tbl = ws.ListObjects("tbl_WBS")
-        If WBS_TableHasColumn(tbl, "Project") Then tbl.ListColumns("Project").Name = "Package"
+        If WBS_TableHasSchemaColumn(tbl, VTS_COL_PROJECT) Then SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_PROJECT).Name = "Package"
     End If
     Application.ScreenUpdating = oldScreenUpdating
     Application.EnableEvents = oldEvents
@@ -425,6 +413,57 @@ ErrHandler:
     Err.Raise errorNumber, errorSource, errorDescription
 
 End Sub
+
+'------------------------------------------------------------------------------
+' FR: Resout la ligne d'onboarding relativement au vrai header de tbl_WBS.
+' EN: Resolves the onboarding row relative to the physical tbl_WBS header.
+'------------------------------------------------------------------------------
+Private Function WBS_OnboardingHelpRow(ByVal tbl As ListObject) As Long
+
+    If tbl Is Nothing Or tbl.HeaderRowRange.Row <= 1 Then
+        Err.Raise vbObjectError + 2334, "WBS_OnboardingHelpRow", _
+            "tbl_WBS has no valid onboarding row immediately above its physical header."
+    End If
+    WBS_OnboardingHelpRow = tbl.HeaderRowRange.Row - 1
+
+End Function
+
+Public Function WBS_OnboardingHarness_CheckStructure() As String
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = ThisWorkbook.Worksheets("WBS")
+    Set tbl = ws.ListObjects("tbl_WBS")
+    WBS_OnboardingHarness_CheckStructure = CStr( _
+        WBS_Onboarding_StructureIsCurrent(ws, tbl, WBS_Onboarding_BuildStatusMap()))
+End Function
+
+Public Function WBS_OnboardingHarness_CheckLocalized( _
+    Optional ByVal languageCode As String = "") As String
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = ThisWorkbook.Worksheets("WBS")
+    Set tbl = ws.ListObjects("tbl_WBS")
+    If Trim$(languageCode) <> "" Then
+        WBS_SetLanguage languageCode
+    Else
+        WBS_SetLanguage Settings_GetOwnerLanguage("WBS")
+    End If
+    WBS_OnboardingHarness_CheckLocalized = CStr( _
+        WBS_Onboarding_LocalizedContentIsCurrent(ws, tbl))
+End Function
+
+Public Function WBS_OnboardingHarness_ApplyLocalized() As String
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = ThisWorkbook.Worksheets("WBS")
+    Set tbl = ws.ListObjects("tbl_WBS")
+    WBS_SetLanguage Settings_GetOwnerLanguage("WBS")
+    WBS_Onboarding_ApplyLocalizedContent ws, tbl
+    WBS_OnboardingHarness_ApplyLocalized = "PASS"
+End Function
 
 '------------------------------------------------------------------------------
 ' FR: Verifie en lecture seule que la ligne d'onboarding utilise la structure canonique.
@@ -442,18 +481,16 @@ Private Function WBS_Onboarding_StructureIsCurrent( _
     On Error GoTo NotCurrent
 
     If ws Is Nothing Or tbl Is Nothing Or statuses Is Nothing Then Exit Function
-    If tbl.HeaderRowRange.Row <> WBS_CANONICAL_HEADER_ROW Then Exit Function
+    If tbl.HeaderRowRange.Row <= 1 Then Exit Function
     If Not tbl.DataBodyRange Is Nothing Then
-        If tbl.DataBodyRange.Row <> WBS_FIRST_DATA_ROW Then Exit Function
+        If tbl.DataBodyRange.Row <> tbl.HeaderRowRange.Row + 1 Then Exit Function
     End If
-    If CStr(ws.Cells(WBS_LOCALIZED_LABEL_ROW, _
-        tbl.ListColumns("Project").Range.Column).Value2) <> "Projet" Then Exit Function
-    If Abs(CDbl(ws.Rows(WBS_ONBOARDING_HELP_ROW).RowHeight) - _
+    If Abs(CDbl(ws.Rows(WBS_OnboardingHelpRow(tbl)).RowHeight) - _
         WBS_ONBOARDING_ROW_HEIGHT) > 0.05 Then Exit Function
 
     For Each key In statuses.Keys
-        Set cell = ws.Cells(WBS_ONBOARDING_HELP_ROW, _
-            tbl.ListColumns(CStr(key)).Range.Column)
+        Set cell = ws.Cells(WBS_OnboardingHelpRow(tbl), _
+            SchemaListColumn(tbl, VTS_TABLE_WBS, CStr(key)).Range.Column)
 
 
         If CStr(cell.Font.Name) <> WBS_ONBOARDING_FONT_NAME Then Exit Function
@@ -493,12 +530,9 @@ Private Sub WBS_Onboarding_ApplyStructure( _
     Dim key As Variant
     Dim cell As Range
 
-    ws.Cells(WBS_LOCALIZED_LABEL_ROW, _
-        tbl.ListColumns("Project").Range.Column).Value = "Projet"
-
     Set helpRange = ws.Range( _
-        ws.Cells(WBS_ONBOARDING_HELP_ROW, tbl.Range.Column), _
-        ws.Cells(WBS_ONBOARDING_HELP_ROW, _
+        ws.Cells(WBS_OnboardingHelpRow(tbl), tbl.Range.Column), _
+        ws.Cells(WBS_OnboardingHelpRow(tbl), _
             tbl.Range.Column + tbl.ListColumns.Count - 1))
 
     helpRange.ClearContents
@@ -521,11 +555,11 @@ Private Sub WBS_Onboarding_ApplyStructure( _
         End With
     End With
 
-    ws.Rows(WBS_ONBOARDING_HELP_ROW).RowHeight = WBS_ONBOARDING_ROW_HEIGHT
+    ws.Rows(WBS_OnboardingHelpRow(tbl)).RowHeight = WBS_ONBOARDING_ROW_HEIGHT
 
     For Each key In statuses.Keys
-        Set cell = ws.Cells(WBS_ONBOARDING_HELP_ROW, _
-            tbl.ListColumns(CStr(key)).Range.Column)
+        Set cell = ws.Cells(WBS_OnboardingHelpRow(tbl), _
+            SchemaListColumn(tbl, VTS_TABLE_WBS, CStr(key)).Range.Column)
         cell.Value = CStr(statuses(key))
         WBS_Onboarding_FormatStatusCell cell
     Next key
@@ -551,7 +585,9 @@ Private Sub WBS_Onboarding_ApplyLocalizedContent( _
     Dim expectedText As String
     Dim actualText As String
     Dim hasThreadedComment As Boolean
+    Dim threadedCommentsSupported As Boolean
     Dim languageIndex As Long
+    Dim columnKeys As Variant
     Dim oldEvents As Boolean
     Dim oldScreenUpdating As Boolean
     Dim errorNumber As Long
@@ -567,7 +603,9 @@ Private Sub WBS_Onboarding_ApplyLocalizedContent( _
     If tbl Is Nothing Then Set tbl = ws.ListObjects("tbl_WBS")
     Set comments = WBS_Onboarding_BuildHelpCommentMap()
     Set statuses = WBS_Onboarding_BuildStatusMap()
+    threadedCommentsSupported = ExcelCompatibility_SupportsThreadedComments()
     languageIndex = IIf(WBS_CurrentLanguage() = "FR", 0, 1)
+    columnKeys = SchemaColumnKeys(VTS_TABLE_WBS)
 
     Application.EnableEvents = False
     Application.ScreenUpdating = False
@@ -575,39 +613,50 @@ Private Sub WBS_Onboarding_ApplyLocalizedContent( _
         gWBSOnboardingLocalizedRebuildCount + 1
 
     For Each key In statuses.Keys
-        Set statusCell = ws.Cells(WBS_ONBOARDING_HELP_ROW, _
-            tbl.ListColumns(CStr(key)).Range.Column)
+        Set statusCell = ws.Cells(WBS_OnboardingHelpRow(tbl), _
+            SchemaListColumn(tbl, VTS_TABLE_WBS, CStr(key)).Range.Column)
         If CStr(statusCell.Value2) <> CStr(statuses(key)) Then
             statusCell.Value = CStr(statuses(key))
         End If
         WBS_Onboarding_FormatStatusCell statusCell
     Next key
 
-    For Each listColumn In tbl.ListColumns
-        Set helpCell = ws.Cells(WBS_ONBOARDING_HELP_ROW, listColumn.Range.Column)
+    For Each key In columnKeys
+        Set listColumn = SchemaListColumn(tbl, VTS_TABLE_WBS, CStr(key))
+        Set helpCell = ws.Cells(WBS_OnboardingHelpRow(tbl), listColumn.Range.Column)
         Set headerCell = listColumn.Range.Cells(1, 1)
 
         If WBS_Onboarding_CellHasAnyComment(headerCell) Then
             WBS_Onboarding_ClearCellComments headerCell
         End If
 
-        If comments.Exists(CStr(listColumn.Name)) Then
-            localizedPair = comments(CStr(listColumn.Name))
+        If comments.Exists(CStr(key)) Then
+            localizedPair = comments(CStr(key))
             expectedText = CStr(localizedPair(languageIndex))
-            actualText = WBS_Onboarding_ThreadedCommentText( _
-                helpCell, hasThreadedComment)
-
-            If WBS_Onboarding_CellHasLegacyComment(helpCell) Or _
-                Not hasThreadedComment Or _
-                WBS_Onboarding_NormalizeComparisonText(actualText) <> _
-                    WBS_Onboarding_NormalizeComparisonText(expectedText) Then
-                WBS_Onboarding_ClearCellComments helpCell
-                helpCell.AddCommentThreaded expectedText
+            If threadedCommentsSupported Then
+                actualText = WBS_Onboarding_ThreadedCommentText( _
+                    helpCell, hasThreadedComment)
+                If WBS_Onboarding_CellHasLegacyComment(helpCell) Or _
+                   Not hasThreadedComment Or _
+                   WBS_Onboarding_NormalizeComparisonText(actualText) <> _
+                        WBS_Onboarding_NormalizeComparisonText(expectedText) Then
+                    WBS_Onboarding_ClearCellComments helpCell
+                    WBS_Onboarding_AddThreadedComment helpCell, expectedText
+                End If
+            Else
+                actualText = WBS_Onboarding_LegacyCommentText( _
+                    helpCell, hasThreadedComment)
+                If Not hasThreadedComment Or _
+                   WBS_Onboarding_NormalizeComparisonText(actualText) <> _
+                        WBS_Onboarding_NormalizeComparisonText(expectedText) Then
+                    WBS_Onboarding_ClearCellComments helpCell
+                    WBS_Onboarding_AddLegacyComment helpCell, expectedText
+                End If
             End If
         ElseIf WBS_Onboarding_CellHasAnyComment(helpCell) Then
             WBS_Onboarding_ClearCellComments helpCell
         End If
-    Next listColumn
+    Next key
 
     WBS_Onboarding_WriteQuickStart ws
 
@@ -652,7 +701,9 @@ Private Function WBS_Onboarding_LocalizedContentIsCurrent( _
     Dim expectedText As String
     Dim actualText As String
     Dim hasThreadedComment As Boolean
+    Dim threadedCommentsSupported As Boolean
     Dim languageIndex As Long
+    Dim columnKeys As Variant
 
     gWBSOnboardingLocalizedCheckCount = _
         gWBSOnboardingLocalizedCheckCount + 1
@@ -663,14 +714,16 @@ Private Function WBS_Onboarding_LocalizedContentIsCurrent( _
 
     Set comments = WBS_Onboarding_BuildHelpCommentMap()
     Set statuses = WBS_Onboarding_BuildStatusMap()
+    threadedCommentsSupported = ExcelCompatibility_SupportsThreadedComments()
     requiredLabel = WBS_Onboarding_RequiredLabel()
     If comments.Count <> 37 Then Exit Function
-    If Not comments.Exists("Project") Then Exit Function
-    If Not comments.Exists("Longest Path") Then Exit Function
-    If Not comments.Exists("Longest Path REX") Then Exit Function
-    If Not comments.Exists("Deadline Float") Then Exit Function
+    If Not comments.Exists(VTS_COL_PROJECT) Then Exit Function
+    If Not comments.Exists(VTS_COL_LONGEST_PATH) Then Exit Function
+    If Not comments.Exists(VTS_COL_LONGEST_PATH_REX) Then Exit Function
+    If Not comments.Exists(VTS_COL_DEADLINE_FLOAT) Then Exit Function
 
     languageIndex = IIf(WBS_CurrentLanguage() = "FR", 0, 1)
+    columnKeys = SchemaColumnKeys(VTS_TABLE_WBS)
     Set noteArea = ws.Range("O1:R2")
 
     If Not CBool(noteArea.MergeCells) Then Exit Function
@@ -682,8 +735,8 @@ Private Function WBS_Onboarding_LocalizedContentIsCurrent( _
     If Not CBool(noteArea.WrapText) Then Exit Function
 
     For Each key In statuses.Keys
-        Set statusCell = ws.Cells(WBS_ONBOARDING_HELP_ROW, _
-            tbl.ListColumns(CStr(key)).Range.Column)
+        Set statusCell = ws.Cells(WBS_OnboardingHelpRow(tbl), _
+            SchemaListColumn(tbl, VTS_TABLE_WBS, CStr(key)).Range.Column)
         actualText = CStr(statusCell.Value2)
         If actualText <> CStr(statuses(key)) Then Exit Function
 
@@ -703,26 +756,32 @@ Private Function WBS_Onboarding_LocalizedContentIsCurrent( _
         End If
     Next key
 
-    For Each listColumn In tbl.ListColumns
-        Set helpCell = ws.Cells(WBS_ONBOARDING_HELP_ROW, listColumn.Range.Column)
+    For Each key In columnKeys
+        Set listColumn = SchemaListColumn(tbl, VTS_TABLE_WBS, CStr(key))
+        Set helpCell = ws.Cells(WBS_OnboardingHelpRow(tbl), listColumn.Range.Column)
         Set headerCell = listColumn.Range.Cells(1, 1)
 
         If WBS_Onboarding_CellHasAnyComment(headerCell) Then Exit Function
-        If WBS_Onboarding_CellHasLegacyComment(helpCell) Then Exit Function
 
-        actualText = WBS_Onboarding_ThreadedCommentText( _
-            helpCell, hasThreadedComment)
+        If threadedCommentsSupported Then
+            If WBS_Onboarding_CellHasLegacyComment(helpCell) Then Exit Function
+            actualText = WBS_Onboarding_ThreadedCommentText( _
+                helpCell, hasThreadedComment)
+        Else
+            actualText = WBS_Onboarding_LegacyCommentText( _
+                helpCell, hasThreadedComment)
+        End If
 
-        If comments.Exists(CStr(listColumn.Name)) Then
+        If comments.Exists(CStr(key)) Then
             If Not hasThreadedComment Then Exit Function
-            localizedPair = comments(CStr(listColumn.Name))
+            localizedPair = comments(CStr(key))
             expectedText = CStr(localizedPair(languageIndex))
             If WBS_Onboarding_NormalizeComparisonText(actualText) <> _
                 WBS_Onboarding_NormalizeComparisonText(expectedText) Then Exit Function
         ElseIf hasThreadedComment Then
             Exit Function
         End If
-    Next listColumn
+    Next key
 
     WBS_Onboarding_LocalizedContentIsCurrent = True
     Exit Function
@@ -774,6 +833,28 @@ Private Function WBS_Onboarding_CellHasLegacyComment( _
 End Function
 
 '------------------------------------------------------------------------------
+' FR: Lit une Note Excel classique sans utiliser l'API threaded.
+' EN: Reads a classic Excel Note without using the threaded API.
+'------------------------------------------------------------------------------
+Private Function WBS_Onboarding_LegacyCommentText( _
+    ByVal cell As Range, _
+    ByRef commentExists As Boolean) As String
+
+    Dim legacyComment As Object
+
+    commentExists = False
+    On Error Resume Next
+    Set legacyComment = cell.Comment
+    On Error GoTo 0
+    If legacyComment Is Nothing Then Exit Function
+
+    commentExists = True
+    WBS_Onboarding_LegacyCommentText = CStr( _
+        CallByName(legacyComment, "Text", VbMethod))
+
+End Function
+
+'------------------------------------------------------------------------------
 ' FR: Lit un commentaire threaded sans modifier la cellule.
 ' EN: Reads a threaded comment without mutating the cell.
 '------------------------------------------------------------------------------
@@ -784,13 +865,17 @@ Private Function WBS_Onboarding_ThreadedCommentText( _
     Dim threadedComment As Object
 
     commentExists = False
+    If Not ExcelCompatibility_SupportsThreadedComments() Then Exit Function
+
+    gWBSOnboardingThreadedReadCount = gWBSOnboardingThreadedReadCount + 1
     On Error Resume Next
     Set threadedComment = cell.CommentThreaded
     On Error GoTo 0
 
     If threadedComment Is Nothing Then Exit Function
     commentExists = True
-    WBS_Onboarding_ThreadedCommentText = CStr(threadedComment.Text)
+    WBS_Onboarding_ThreadedCommentText = CStr( _
+        CallByName(threadedComment, "Text", VbMethod))
 
 End Function
 
@@ -816,10 +901,47 @@ End Function
 '------------------------------------------------------------------------------
 Private Sub WBS_Onboarding_ClearCellComments(ByVal cell As Range)
 
+    Dim legacyComment As Object
+    Dim threadedComment As Object
+
     On Error Resume Next
-    cell.ClearComments
-    cell.ClearCommentsThreaded
+    Set legacyComment = cell.Comment
+    If Not legacyComment Is Nothing Then legacyComment.Delete
+    If ExcelCompatibility_SupportsThreadedComments() Then
+        Set threadedComment = cell.CommentThreaded
+        If Not threadedComment Is Nothing Then
+            gWBSOnboardingThreadedClearCount = gWBSOnboardingThreadedClearCount + 1
+            CallByName threadedComment, "Delete", VbMethod
+        End If
+    End If
     On Error GoTo 0
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Ajoute un commentaire threaded uniquement lorsque l'API Excel est disponible.
+' EN: Adds a threaded comment only when the Excel API is available.
+'------------------------------------------------------------------------------
+Private Sub WBS_Onboarding_AddThreadedComment( _
+    ByVal cell As Range, _
+    ByVal commentText As String)
+
+    If Not ExcelCompatibility_SupportsThreadedComments() Then Exit Sub
+
+    gWBSOnboardingThreadedAddCount = gWBSOnboardingThreadedAddCount + 1
+    CallByName cell, "AddCommentThreaded", VbMethod, commentText
+
+End Sub
+
+'------------------------------------------------------------------------------
+' FR: Ajoute une Note Excel classique sur les versions sans commentaires threaded.
+' EN: Adds a classic Excel Note on versions without threaded comments.
+'------------------------------------------------------------------------------
+Private Sub WBS_Onboarding_AddLegacyComment( _
+    ByVal cell As Range, _
+    ByVal commentText As String)
+
+    cell.AddComment commentText
 
 End Sub
 
@@ -834,116 +956,116 @@ Private Function WBS_Onboarding_BuildHelpCommentMap() As Object
     Set comments = CreateObject("Scripting.Dictionary")
     comments.CompareMode = vbTextCompare
 
-    WBS_Onboarding_AddHelpComment comments, "ID", _
-        "RÙle : identifiant unique de la ligne.{NL}Saisie attendue : entier unique, sans doublon.{NL}Exemple : 1 / 17 / 29{NL}{NL}UtilitÈ :{NL}- Sert de clÈ technique entre WBS, CALC, GANTT et S-Curve.{NL}- Ne doit jamais Ítre dupliquÈ.{NL}- Peut rester simple mÍme si le WBS change.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_ID, _
+        "R√¥le : identifiant unique de la ligne.{NL}Saisie attendue : entier unique, sans doublon.{NL}Exemple : 1 / 17 / 29{NL}{NL}Utilit√© :{NL}- Sert de cl√© technique entre WBS, CALC, GANTT et S-Curve.{NL}- Ne doit jamais √™tre dupliqu√©.{NL}- Peut rester simple m√™me si le WBS change.", _
         "Purpose: unique row identifier.{NL}Expected input: unique integer, no duplicates.{NL}Example: 1 / 17 / 29{NL}{NL}Use:{NL}- Technical key used across WBS, CALC, GANTT and S-Curve.{NL}- Must never be duplicated.{NL}- Can stay stable even if the WBS code changes."
-    WBS_Onboarding_AddHelpComment comments, "WBS", _
-        "RÙle : code hiÈrarchique de la t‚che dans la structure du projet.{NL}Saisie attendue : format numÈrique hiÈrarchique avec points.{NL}Exemple : 1.0 / 1.3 / 1.3.2 / 1.3.2.1{NL}{NL}RËgles :{NL}- Utiliser uniquement des chiffres et des points.{NL}- Pas díespace, pas de lettres.{NL}- Une t‚che parent a des enfants dont le WBS commence par son propre code.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_WBS, _
+        "R√¥le : code hi√©rarchique de la t√¢che dans la structure du projet.{NL}Saisie attendue : format num√©rique hi√©rarchique avec points.{NL}Exemple : 1.0 / 1.3 / 1.3.2 / 1.3.2.1{NL}{NL}R√®gles :{NL}- Utiliser uniquement des chiffres et des points.{NL}- Pas d‚Äôespace, pas de lettres.{NL}- Une t√¢che parent a des enfants dont le WBS commence par son propre code.", _
         "Purpose: hierarchical code of the task in the project structure.{NL}Expected input: numeric hierarchical format using dots.{NL}Example: 1.0 / 1.3 / 1.3.2 / 1.3.2.1{NL}{NL}Rules:{NL}- Use numbers and dots only.{NL}- No spaces, no letters.{NL}- A parent task has child tasks whose WBS starts with its own code."
-    WBS_Onboarding_AddHelpComment comments, "Task Name", _
-        "RÙle : nom court de la t‚che.{NL}Saisie attendue : intitulÈ clair et lisible.{NL}Exemple : Kick-off / RFQ / Assembly / FAT{NL}{NL}Conseil :{NL}- Rester court.{NL}- Utiliser un nom orientÈ action ou livrable.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_TASK_NAME, _
+        "R√¥le : nom court de la t√¢che.{NL}Saisie attendue : intitul√© clair et lisible.{NL}Exemple : Kick-off / RFQ / Assembly / FAT{NL}{NL}Conseil :{NL}- Rester court.{NL}- Utiliser un nom orient√© action ou livrable.", _
         "Purpose: short task name.{NL}Expected input: clear readable label.{NL}Example: Kick-off / RFQ / Assembly / FAT{NL}{NL}Tip:{NL}- Keep it short.{NL}- Prefer action-oriented or deliverable-oriented wording."
-    WBS_Onboarding_AddHelpComment comments, "Task Description", _
-        "RÙle : description dÈtaillÈe de la t‚che.{NL}Saisie attendue : phrase courte ou prÈcision utile.{NL}Exemple : Project official start meeting / Vendor docs review{NL}{NL}UtilitÈ :{NL}- Aide ‡ comprendre la t‚che sans lire tout le planning.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_TASK_DESCRIPTION, _
+        "R√¥le : description d√©taill√©e de la t√¢che.{NL}Saisie attendue : phrase courte ou pr√©cision utile.{NL}Exemple : Project official start meeting / Vendor docs review{NL}{NL}Utilit√© :{NL}- Aide √† comprendre la t√¢che sans lire tout le planning.", _
         "Purpose: detailed task description.{NL}Expected input: short sentence or useful clarification.{NL}Example: Project official start meeting / Vendor docs review{NL}{NL}Use:{NL}- Helps understand the task without reading the full schedule."
-    WBS_Onboarding_AddHelpComment comments, "Discipline", _
-        "RÙle : discipline technique principale concernÈe.{NL}Saisie attendue : nom de discipline cohÈrent sur tout le fichier.{NL}Exemple : Process / Mechanical / Structure / QAQC / Logistics{NL}{NL}Conseil :{NL}- Garder un vocabulaire homogËne dans tout le planning.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_DISCIPLINE, _
+        "R√¥le : discipline technique principale concern√©e.{NL}Saisie attendue : nom de discipline coh√©rent sur tout le fichier.{NL}Exemple : Process / Mechanical / Structure / QAQC / Logistics{NL}{NL}Conseil :{NL}- Garder un vocabulaire homog√®ne dans tout le planning.", _
         "Purpose: main technical discipline involved.{NL}Expected input: discipline name used consistently across the file.{NL}Example: Process / Mechanical / Structure / QAQC / Logistics{NL}{NL}Tip:{NL}- Keep the wording consistent throughout the schedule."
-    WBS_Onboarding_AddHelpComment comments, "Supplier", _
-        "RÙle : acteur principal responsable ou concernÈ par la t‚che.{NL}Saisie attendue : nom de sociÈtÈ, fournisseur ou entitÈ interne.{NL}Exemple : Internal / Vendor A / Client / Forwarder", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_SUPPLIER, _
+        "R√¥le : acteur principal responsable ou concern√© par la t√¢che.{NL}Saisie attendue : nom de soci√©t√©, fournisseur ou entit√© interne.{NL}Exemple : Internal / Vendor A / Client / Forwarder", _
         "Purpose: main party responsible for or involved in the task.{NL}Expected input: company name, supplier or internal entity.{NL}Example: Internal / Vendor A / Client / Forwarder"
-    WBS_Onboarding_AddHelpComment comments, "Project", _
-        "RÙle : projet ou regroupement mÈtier facultatif associÈ ‡ la t‚che.{NL}Saisie attendue : nom du projet ou regroupement utile.{NL}Exemple : Projet A / Fabrication / Zone 2{NL}{NL}UtilitÈ :{NL}- Facilite le regroupement mÈtier des t‚ches.{NL}- Peut rester vide.{NL}- N'intervient pas dans le calcul du planning.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_PROJECT, _
+        "R√¥le : projet ou regroupement m√©tier facultatif associ√© √† la t√¢che.{NL}Saisie attendue : nom du projet ou regroupement utile.{NL}Exemple : Projet A / Fabrication / Zone 2{NL}{NL}Utilit√© :{NL}- Facilite le regroupement m√©tier des t√¢ches.{NL}- Peut rester vide.{NL}- N'intervient pas dans le calcul du planning.", _
         "Purpose: optional project or business grouping associated with the task.{NL}Expected input: project name or useful grouping.{NL}Example: Project A / Fabrication / Area 2{NL}{NL}Use:{NL}- Helps group tasks for business reporting.{NL}- May be left blank.{NL}- Does not affect schedule calculation."
-    WBS_Onboarding_AddHelpComment comments, "Task Type", _
-        "RÙle : dÈfinit le comportement de la t‚che dans le moteur de planning.{NL}{NL}Valeurs autorisÈes :{NL}Task{NL}Milestone{NL}Level of Effort{NL}{NL}DÈfinition :{NL}{NL}Task{NL}t‚che standard avec durÈe{NL}peut avoir des prÈdÈcesseurs{NL}pilotÈe par Actual / Forecast / Baseline / Dependencies{NL}impacte le rÈseau normalement{NL}{NL}Milestone{NL}t‚che sans durÈe (ÈvÈnement ponctuel){NL}durÈe nulle ou minimale selon convention{NL}peut avoir des prÈdÈcesseurs{NL}reprÈsente un jalon (dÈbut / fin / validation){NL}{NL}Level of Effort{NL}t‚che dÈpendante díune plage díactivitÈs{NL}ne pilote pas le planning{NL}est pilotÈe par ses dÈpendances{NL}gÈnÈralement dÈfinie par SS (dÈbut) et FF (fin){NL}durÈe dÈduite du rÈseau{NL}{NL}RËgles :{NL}une seule valeur par t‚che{NL}respecter strictement les valeurs autorisÈes{NL}une LOE ne doit pas Ítre utilisÈe comme driver díautres t‚ches{NL}une milestone ne doit pas porter de durÈe mÈtier", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_TASK_TYPE, _
+        "R√¥le : d√©finit le comportement de la t√¢che dans le moteur de planning.{NL}{NL}Valeurs autoris√©es :{NL}Task{NL}Milestone{NL}Level of Effort{NL}{NL}D√©finition :{NL}{NL}Task{NL}t√¢che standard avec dur√©e{NL}peut avoir des pr√©d√©cesseurs{NL}pilot√©e par Actual / Forecast / Baseline / Dependencies{NL}impacte le r√©seau normalement{NL}{NL}Milestone{NL}t√¢che sans dur√©e (√©v√©nement ponctuel){NL}dur√©e nulle ou minimale selon convention{NL}peut avoir des pr√©d√©cesseurs{NL}repr√©sente un jalon (d√©but / fin / validation){NL}{NL}Level of Effort{NL}t√¢che d√©pendante d‚Äôune plage d‚Äôactivit√©s{NL}ne pilote pas le planning{NL}est pilot√©e par ses d√©pendances{NL}g√©n√©ralement d√©finie par SS (d√©but) et FF (fin){NL}dur√©e d√©duite du r√©seau{NL}{NL}R√®gles :{NL}une seule valeur par t√¢che{NL}respecter strictement les valeurs autoris√©es{NL}une LOE ne doit pas √™tre utilis√©e comme driver d‚Äôautres t√¢ches{NL}une milestone ne doit pas porter de dur√©e m√©tier", _
         "Purpose: defines the task behavior within the planning engine.{NL}{NL}Allowed values:{NL}Task{NL}Milestone{NL}Level of Effort{NL}{NL}Definition:{NL}{NL}Task{NL}standard task with duration{NL}can have predecessors{NL}driven by Actual / Forecast / Baseline / Dependencies{NL}fully participates in the network{NL}{NL}Milestone{NL}zero-duration task (event){NL}duration is zero or minimal depending on convention{NL}can have predecessors{NL}represents a key event (start / finish / validation){NL}{NL}Level of Effort{NL}task spanning a range of activities{NL}does not drive the schedule{NL}is driven by its dependencies{NL}typically defined using SS (start) and FF (finish) links{NL}duration is derived from the network{NL}{NL}Rules:{NL}one value per task{NL}must match allowed values exactly{NL}a LOE must not be used as a driver for other tasks{NL}a milestone must not carry business duration"
-    WBS_Onboarding_AddHelpComment comments, "S", _
-        "RÙle : dÈfinit si la t‚che doit apparaÓtre dans la vue Summary du Gantt.{NL}Valeurs autorisÈes :{NL}Y{NL}N{NL}DÈfinition :{NL}Y{NL}la t‚che est affichÈe dans la vue Summary{NL}peut Ítre utilisÈ pour afficher une t‚che standard importante{NL}permet de forcer líaffichage díune ligne mÍme si ce níest pas un parent ou une milestone{NL}N{NL}la t‚che est masquÈe dans la vue Summary{NL}permet de masquer une milestone ou une ligne non pertinente{NL}níimpacte pas le calcul planning{NL}RËgles :{NL}si vide, la valeur est remplie automatiquement{NL}parents / summaries : Y par dÈfaut{NL}milestones : Y par dÈfaut{NL}tasks standard : N par dÈfaut{NL}Level of Effort : N par dÈfaut{NL}une valeur dÈj‡ renseignÈe níest jamais ÈcrasÈe{NL}Y ou N uniquement", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_S, _
+        "R√¥le : d√©finit si la t√¢che doit appara√Ætre dans la vue Summary du Gantt.{NL}Valeurs autoris√©es :{NL}Y{NL}N{NL}D√©finition :{NL}Y{NL}la t√¢che est affich√©e dans la vue Summary{NL}peut √™tre utilis√© pour afficher une t√¢che standard importante{NL}permet de forcer l‚Äôaffichage d‚Äôune ligne m√™me si ce n‚Äôest pas un parent ou une milestone{NL}N{NL}la t√¢che est masqu√©e dans la vue Summary{NL}permet de masquer une milestone ou une ligne non pertinente{NL}n‚Äôimpacte pas le calcul planning{NL}R√®gles :{NL}si vide, la valeur est remplie automatiquement{NL}parents / summaries : Y par d√©faut{NL}milestones : Y par d√©faut{NL}tasks standard : N par d√©faut{NL}Level of Effort : N par d√©faut{NL}une valeur d√©j√† renseign√©e n‚Äôest jamais √©cras√©e{NL}Y ou N uniquement", _
         "Purpose: defines whether the task should appear in the Gantt Summary view.{NL}Allowed values:{NL}Y{NL}N{NL}Definition:{NL}Y{NL}task is displayed in the Summary view{NL}can be used to show an important standard task{NL}forces a row to appear even if it is not a parent or milestone{NL}N{NL}task is hidden from the Summary view{NL}can be used to hide a milestone or non-relevant row{NL}does not impact schedule calculation{NL}Rules:{NL}if blank, the value is filled automatically{NL}parents / summaries: Y by default{NL}milestones: Y by default{NL}standard tasks: N by default{NL}Level of Effort: N by default{NL}an existing value is never overwritten{NL}Y or N only"
-    WBS_Onboarding_AddHelpComment comments, "Comments", _
-        "RÙle : zone libre pour note de contexte.{NL}Saisie attendue : commentaire court, risque, hypothËse, prÈcision.{NL}Exemple : Waiting vendor confirmation / Milestone imposed by client", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_COMMENTS, _
+        "R√¥le : zone libre pour note de contexte.{NL}Saisie attendue : commentaire court, risque, hypoth√®se, pr√©cision.{NL}Exemple : Waiting vendor confirmation / Milestone imposed by client", _
         "Purpose: free text field for context notes.{NL}Expected input: short comment, risk, assumption or clarification.{NL}Example: Waiting vendor confirmation / Milestone imposed by client"
-    WBS_Onboarding_AddHelpComment comments, "Predecessors WBS", _
-        "RÙle : antÈcÈdents de la t‚che, saisis au format WBS avec type de lien et lag Èventuel.{NL}Saisie attendue :{NL}un ou plusieurs prÈdÈcesseurs sÈparÈs par un point-virgule{NL}type par dÈfaut = FS si rien níest prÈcisÈ{NL}Exemples :{NL}1.2.3{NL}1.2.3+4{NL}1.2.3-2{NL}1.2.3FS+4{NL}1.2.3SS-2{NL}1.2.3FF{NL}1.2.3;1.4.1SS+2;2.3FF-1{NL}RËgles :{NL}pas díespace{NL}utiliser le WBS, pas líID{NL}types autorisÈs : FS, SS, FF{NL}lag autorisÈ en positif ou nÈgatif{NL}le moteur convertit ensuite cette donnÈe en IDs techniques + table de liens logiques", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_PREDECESSORS_WBS, _
+        "R√¥le : ant√©c√©dents de la t√¢che, saisis au format WBS avec type de lien et lag √©ventuel.{NL}Saisie attendue :{NL}un ou plusieurs pr√©d√©cesseurs s√©par√©s par un point-virgule{NL}type par d√©faut = FS si rien n‚Äôest pr√©cis√©{NL}Exemples :{NL}1.2.3{NL}1.2.3+4{NL}1.2.3-2{NL}1.2.3FS+4{NL}1.2.3SS-2{NL}1.2.3FF{NL}1.2.3;1.4.1SS+2;2.3FF-1{NL}R√®gles :{NL}pas d‚Äôespace{NL}utiliser le WBS, pas l‚ÄôID{NL}types autoris√©s : FS, SS, FF{NL}lag autoris√© en positif ou n√©gatif{NL}le moteur convertit ensuite cette donn√©e en IDs techniques + table de liens logiques", _
         "Purpose: task predecessors entered using WBS codes, with optional link type and lag.{NL}Expected input:{NL}one or more predecessors separated by semicolons{NL}default link type = FS when omitted{NL}Examples:{NL}1.2.3{NL}1.2.3+4{NL}1.2.3-2{NL}1.2.3FS+4{NL}1.2.3SS-2{NL}1.2.3FF{NL}1.2.3;1.4.1SS+2;2.3FF-1{NL}Rules:{NL}no spaces{NL}use WBS, not ID{NL}allowed link types: FS, SS, FF{NL}positive or negative lag allowed{NL}the engine then converts this input into technical IDs + logical link table"
-    WBS_Onboarding_AddHelpComment comments, "Weight (%)", _
-        "RÙle : poids de la t‚che pour les analyses de charge ou de progression pondÈrÈe.{NL}Saisie attendue : valeur de poids selon la logique projet.{NL}Exemple : 20000 Ä / 15 / 4.5{NL}{NL}UtilitÈ :{NL}- Peut reprÈsenter un co˚t, une charge, un volume ou tout autre poids relatif.{NL}- La S-Curve travaille sur les t‚ches feuilles uniquement et normalise ensuite les poids.", _
-        "Purpose: task weight used for workload or weighted progress analysis.{NL}Expected input: weight value according to the project logic.{NL}Example: 20000 Ä / 15 / 4.5{NL}{NL}Use:{NL}- Can represent cost, effort, quantity or any relative weighting.{NL}- The S-Curve works on leaf tasks only and then normalizes weights."
-    WBS_Onboarding_AddHelpComment comments, "% Progress", _
-        "RÙle : avancement manuel de la t‚che.{NL}Saisie attendue : pourcentage entre 0% et 100%.{NL}Exemple : 0% / 8% / 70% / 100%{NL}{NL}RËgles :{NL}- ¿ renseigner sur les t‚ches feuilles.{NL}- En líabsence de valeur, líaffichage Gantt peut considÈrer 0%.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_WEIGHT_PERCENT, _
+        "R√¥le : poids de la t√¢che pour les analyses de charge ou de progression pond√©r√©e.{NL}Saisie attendue : valeur de poids selon la logique projet.{NL}Exemple : 20000 ‚Ç¨ / 15 / 4.5{NL}{NL}Utilit√© :{NL}- Peut repr√©senter un co√ªt, une charge, un volume ou tout autre poids relatif.{NL}- La S-Curve travaille sur les t√¢ches feuilles uniquement et normalise ensuite les poids.", _
+        "Purpose: task weight used for workload or weighted progress analysis.{NL}Expected input: weight value according to the project logic.{NL}Example: 20000 ‚Ç¨ / 15 / 4.5{NL}{NL}Use:{NL}- Can represent cost, effort, quantity or any relative weighting.{NL}- The S-Curve works on leaf tasks only and then normalizes weights."
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_PROGRESS_PERCENT, _
+        "R√¥le : avancement manuel de la t√¢che.{NL}Saisie attendue : pourcentage entre 0% et 100%.{NL}Exemple : 0% / 8% / 70% / 100%{NL}{NL}R√®gles :{NL}- √Ä renseigner sur les t√¢ches feuilles.{NL}- En l‚Äôabsence de valeur, l‚Äôaffichage Gantt peut consid√©rer 0%.", _
         "Purpose: manual task progress.{NL}Expected input: percentage between 0% and 100%.{NL}Example: 0% / 8% / 70% / 100%{NL}{NL}Rules:{NL}- Meant for leaf tasks.{NL}- When empty, Gantt display may treat it as 0%."
-    WBS_Onboarding_AddHelpComment comments, "Baseline Start", _
-        "RÙle : date de dÈbut de rÈfÈrence.{NL}Saisie attendue : date baseline prÈvue au plan initial.{NL}Exemple : 05/02/2026{NL}{NL}UtilitÈ :{NL}- Sert de base de comparaison pour les Ècarts.{NL}- UtilisÈe par le moteur et par les analyses REX.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_BASELINE_START, _
+        "R√¥le : date de d√©but de r√©f√©rence.{NL}Saisie attendue : date baseline pr√©vue au plan initial.{NL}Exemple : 05/02/2026{NL}{NL}Utilit√© :{NL}- Sert de base de comparaison pour les √©carts.{NL}- Utilis√©e par le moteur et par les analyses REX.", _
         "Purpose: reference start date.{NL}Expected input: baseline start date from the initial plan.{NL}Example: 05/02/2026{NL}{NL}Use:{NL}- Used as comparison basis for variances.{NL}- Used by the engine and by REX analyses."
-    WBS_Onboarding_AddHelpComment comments, "Baseline Duration", _
-        "RÙle : durÈe baseline en jours calendaires inclusifs.{NL}Saisie attendue : entier positif.{NL}Exemple : 1 / 5 / 12{NL}{NL}RËgle importante :{NL}- Une durÈe de 1 jour signifie dÈbut = fin le mÍme jour.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_BASELINE_DURATION, _
+        "R√¥le : dur√©e baseline en jours calendaires inclusifs.{NL}Saisie attendue : entier positif.{NL}Exemple : 1 / 5 / 12{NL}{NL}R√®gle importante :{NL}- Une dur√©e de 1 jour signifie d√©but = fin le m√™me jour.", _
         "Purpose: baseline duration in inclusive calendar days.{NL}Expected input: positive integer.{NL}Example: 1 / 5 / 12{NL}{NL}Important rule:{NL}- A duration of 1 day means start = finish on the same day."
-    WBS_Onboarding_AddHelpComment comments, "Baseline Finish", _
-        "RÙle : date de fin baseline.{NL}Calcul / logique :{NL}- Colonne calculÈe automatiquement ‡ partir de Baseline Start et Baseline Duration.{NL}- Logique inclusive : Finish = Start + Duration - 1{NL}{NL}UtilitÈ :{NL}- Sert aux Ècarts de fin et aux comparaisons planning.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_BASELINE_FINISH, _
+        "R√¥le : date de fin baseline.{NL}Calcul / logique :{NL}- Colonne calcul√©e automatiquement √† partir de Baseline Start et Baseline Duration.{NL}- Logique inclusive : Finish = Start + Duration - 1{NL}{NL}Utilit√© :{NL}- Sert aux √©carts de fin et aux comparaisons planning.", _
         "Purpose: baseline finish date.{NL}Calculation / logic:{NL}- Automatically calculated from Baseline Start and Baseline Duration.{NL}- Inclusive logic: Finish = Start + Duration - 1{NL}{NL}Use:{NL}- Used for finish variance and schedule comparisons."
-    WBS_Onboarding_AddHelpComment comments, "Actual Start", _
-        "RÙle : date de dÈbut rÈellement constatÈe.{NL}Saisie attendue : date rÈelle si la t‚che a commencÈ.{NL}Exemple : 21/03/2026{NL}{NL}UtilitÈ :{NL}- Prioritaire sur Forecast et Baseline pour le calcul moteur.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_ACTUAL_START, _
+        "R√¥le : date de d√©but r√©ellement constat√©e.{NL}Saisie attendue : date r√©elle si la t√¢che a commenc√©.{NL}Exemple : 21/03/2026{NL}{NL}Utilit√© :{NL}- Prioritaire sur Forecast et Baseline pour le calcul moteur.", _
         "Purpose: actual observed start date.{NL}Expected input: real start date if the task has started.{NL}Example: 21/03/2026{NL}{NL}Use:{NL}- Has priority over Forecast and Baseline in the engine logic."
-    WBS_Onboarding_AddHelpComment comments, "Actual Finish", _
-        "RÙle : date de fin rÈellement constatÈe.{NL}Saisie attendue : date rÈelle si la t‚che est terminÈe.{NL}Exemple : 23/03/2026{NL}{NL}UtilitÈ :{NL}- Prioritaire pour le calcul de la fin si prÈsente.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_ACTUAL_FINISH, _
+        "R√¥le : date de fin r√©ellement constat√©e.{NL}Saisie attendue : date r√©elle si la t√¢che est termin√©e.{NL}Exemple : 23/03/2026{NL}{NL}Utilit√© :{NL}- Prioritaire pour le calcul de la fin si pr√©sente.", _
         "Purpose: actual observed finish date.{NL}Expected input: real finish date if the task is completed.{NL}Example: 23/03/2026{NL}{NL}Use:{NL}- Has priority for finish calculation when present."
-    WBS_Onboarding_AddHelpComment comments, "Actual Duration", _
-        "RÙle : durÈe rÈelle observÈe.{NL}Calcul / logique :{NL}- Colonne calculÈe automatiquement ‡ partir de Actual Start et Actual Finish.{NL}- Logique inclusive : Duration = Finish - Start + 1{NL}{NL}UtilitÈ :{NL}- Donne la durÈe rÈelle constatÈe sans saisie manuelle.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_ACTUAL_DURATION, _
+        "R√¥le : dur√©e r√©elle observ√©e.{NL}Calcul / logique :{NL}- Colonne calcul√©e automatiquement √† partir de Actual Start et Actual Finish.{NL}- Logique inclusive : Duration = Finish - Start + 1{NL}{NL}Utilit√© :{NL}- Donne la dur√©e r√©elle constat√©e sans saisie manuelle.", _
         "Purpose: actual observed duration.{NL}Calculation / logic:{NL}- Automatically calculated from Actual Start and Actual Finish.{NL}- Inclusive logic: Duration = Finish - Start + 1{NL}{NL}Use:{NL}- Provides the real duration without manual entry."
-    WBS_Onboarding_AddHelpComment comments, "Forecast Start", _
-        "RÙle : date de dÈbut prÈvisionnelle mise ‡ jour.{NL}Saisie attendue : date forecast si la t‚che níest pas entiËrement portÈe par líActual.{NL}Exemple : 04/04/2026{NL}{NL}UtilitÈ :{NL}- Permet de simuler ou piloter une dÈrive planning.{NL}- Si incohÈrente avec les dÈpendances, le moteur bloque.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_FORECAST_START, _
+        "R√¥le : date de d√©but pr√©visionnelle mise √† jour.{NL}Saisie attendue : date forecast si la t√¢che n‚Äôest pas enti√®rement port√©e par l‚ÄôActual.{NL}Exemple : 04/04/2026{NL}{NL}Utilit√© :{NL}- Permet de simuler ou piloter une d√©rive planning.{NL}- Si incoh√©rente avec les d√©pendances, le moteur bloque.", _
         "Purpose: updated forecast start date.{NL}Expected input: forecast date when the task is not fully driven by Actual data.{NL}Example: 04/04/2026{NL}{NL}Use:{NL}- Allows schedule drift management and simulation.{NL}- If inconsistent with dependencies, the engine blocks."
-    WBS_Onboarding_AddHelpComment comments, "Forecast Finish", _
-        "RÙle : date de fin prÈvisionnelle mise ‡ jour.{NL}Saisie attendue : date forecast de fin.{NL}Exemple : 30/04/2026{NL}{NL}UtilitÈ :{NL}- Permet díimposer une fin forecast.{NL}- Si seule la date de dÈbut est donnÈe, le moteur conserve la durÈe de rÈfÈrence.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_FORECAST_FINISH, _
+        "R√¥le : date de fin pr√©visionnelle mise √† jour.{NL}Saisie attendue : date forecast de fin.{NL}Exemple : 30/04/2026{NL}{NL}Utilit√© :{NL}- Permet d‚Äôimposer une fin forecast.{NL}- Si seule la date de d√©but est donn√©e, le moteur conserve la dur√©e de r√©f√©rence.", _
         "Purpose: updated forecast finish date.{NL}Expected input: forecast finish date.{NL}Example: 30/04/2026{NL}{NL}Use:{NL}- Allows forcing a forecast finish.{NL}- If only the start is given, the engine keeps the reference duration."
-    WBS_Onboarding_AddHelpComment comments, "Calculated Start", _
-        "RÙle : date de dÈbut calculÈe par le moteur.{NL}Calcul / logique :{NL}- PrioritÈ gÈnÈrale : Actual > Forecast > Baseline > DÈpendances seules{NL}- Le moteur tient compte des prÈdÈcesseurs et du lag.{NL}{NL}UtilitÈ :{NL}- RÈfÈrence consolidÈe utilisÈe pour le Gantt et les analyses.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_CALCULATED_START, _
+        "R√¥le : date de d√©but calcul√©e par le moteur.{NL}Calcul / logique :{NL}- Priorit√© g√©n√©rale : Actual > Forecast > Baseline > D√©pendances seules{NL}- Le moteur tient compte des pr√©d√©cesseurs et du lag.{NL}{NL}Utilit√© :{NL}- R√©f√©rence consolid√©e utilis√©e pour le Gantt et les analyses.", _
         "Purpose: engine-calculated start date.{NL}Calculation / logic:{NL}- General priority: Actual > Forecast > Baseline > Dependencies only{NL}- The engine also applies predecessors and lag.{NL}{NL}Use:{NL}- Consolidated reference used by Gantt and analyses."
-    WBS_Onboarding_AddHelpComment comments, "Calculated Finish", _
-        "RÙle : date de fin calculÈe par le moteur.{NL}Calcul / logique :{NL}- BasÈe sur Actual Finish si prÈsent, sinon Forecast Finish si prÈsent, sinon durÈe de rÈfÈrence.{NL}- Toujours cohÈrente avec Calculated Start si le calcul rÈussit.{NL}{NL}UtilitÈ :{NL}- RÈfÈrence consolidÈe utilisÈe pour le Gantt et les analyses.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_CALCULATED_FINISH, _
+        "R√¥le : date de fin calcul√©e par le moteur.{NL}Calcul / logique :{NL}- Bas√©e sur Actual Finish si pr√©sent, sinon Forecast Finish si pr√©sent, sinon dur√©e de r√©f√©rence.{NL}- Toujours coh√©rente avec Calculated Start si le calcul r√©ussit.{NL}{NL}Utilit√© :{NL}- R√©f√©rence consolid√©e utilis√©e pour le Gantt et les analyses.", _
         "Purpose: engine-calculated finish date.{NL}Calculation / logic:{NL}- Based on Actual Finish if present, otherwise Forecast Finish if present, otherwise reference duration.{NL}- Always aligned with Calculated Start if the calculation succeeds.{NL}{NL}Use:{NL}- Consolidated reference used by Gantt and analyses."
-    WBS_Onboarding_AddHelpComment comments, "Calculated Duration", _
-        "RÙle : durÈe calculÈe consolidÈe.{NL}Calcul / logique :{NL}- Colonne calculÈe automatiquement ‡ partir de Calculated Start et Calculated Finish.{NL}- Logique inclusive : Duration = Finish - Start + 1{NL}{NL}UtilitÈ :{NL}- Affiche la durÈe rÈellement retenue aprËs calcul.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_CALCULATED_DURATION, _
+        "R√¥le : dur√©e calcul√©e consolid√©e.{NL}Calcul / logique :{NL}- Colonne calcul√©e automatiquement √† partir de Calculated Start et Calculated Finish.{NL}- Logique inclusive : Duration = Finish - Start + 1{NL}{NL}Utilit√© :{NL}- Affiche la dur√©e r√©ellement retenue apr√®s calcul.", _
         "Purpose: consolidated calculated duration.{NL}Calculation / logic:{NL}- Automatically calculated from Calculated Start and Calculated Finish.{NL}- Inclusive logic: Duration = Finish - Start + 1{NL}{NL}Use:{NL}- Shows the duration finally retained after calculation."
-    WBS_Onboarding_AddHelpComment comments, "Start Variance", _
-        "RÙle : Ècart entre le dÈbut calculÈ et le dÈbut baseline.{NL}Calcul / logique :{NL}- Start Variance = Calculated Start - Baseline Start{NL}{NL}Lecture :{NL}- 0 = conforme baseline{NL}- > 0 = dÈmarrage plus tardif{NL}- < 0 = dÈmarrage plus tÙt", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_START_VARIANCE, _
+        "R√¥le : √©cart entre le d√©but calcul√© et le d√©but baseline.{NL}Calcul / logique :{NL}- Start Variance = Calculated Start - Baseline Start{NL}{NL}Lecture :{NL}- 0 = conforme baseline{NL}- > 0 = d√©marrage plus tardif{NL}- < 0 = d√©marrage plus t√¥t", _
         "Purpose: variance between calculated start and baseline start.{NL}Calculation / logic:{NL}- Start Variance = Calculated Start - Baseline Start{NL}{NL}Reading:{NL}- 0 = aligned with baseline{NL}- > 0 = later start{NL}- < 0 = earlier start"
-    WBS_Onboarding_AddHelpComment comments, "Finish Variance", _
-        "RÙle : Ècart entre la fin calculÈe et la fin baseline.{NL}Calcul / logique :{NL}- Finish Variance = Calculated Finish - Baseline Finish{NL}{NL}Lecture :{NL}- 0 = conforme baseline{NL}- > 0 = fin plus tardive{NL}- < 0 = fin plus tÙt", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_FINISH_VARIANCE, _
+        "R√¥le : √©cart entre la fin calcul√©e et la fin baseline.{NL}Calcul / logique :{NL}- Finish Variance = Calculated Finish - Baseline Finish{NL}{NL}Lecture :{NL}- 0 = conforme baseline{NL}- > 0 = fin plus tardive{NL}- < 0 = fin plus t√¥t", _
         "Purpose: variance between calculated finish and baseline finish.{NL}Calculation / logic:{NL}- Finish Variance = Calculated Finish - Baseline Finish{NL}{NL}Reading:{NL}- 0 = aligned with baseline{NL}- > 0 = later finish{NL}- < 0 = earlier finish"
-    WBS_Onboarding_AddHelpComment comments, "Duration Variance", _
-        "RÙle : Ècart entre la durÈe calculÈe et la durÈe baseline.{NL}Calcul / logique :{NL}- Duration Variance = Calculated Duration - Baseline Duration{NL}{NL}Lecture :{NL}- 0 = durÈe inchangÈe{NL}- > 0 = durÈe plus longue{NL}- < 0 = durÈe plus courte", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_DURATION_VARIANCE, _
+        "R√¥le : √©cart entre la dur√©e calcul√©e et la dur√©e baseline.{NL}Calcul / logique :{NL}- Duration Variance = Calculated Duration - Baseline Duration{NL}{NL}Lecture :{NL}- 0 = dur√©e inchang√©e{NL}- > 0 = dur√©e plus longue{NL}- < 0 = dur√©e plus courte", _
         "Purpose: variance between calculated duration and baseline duration.{NL}Calculation / logic:{NL}- Duration Variance = Calculated Duration - Baseline Duration{NL}{NL}Reading:{NL}- 0 = unchanged duration{NL}- > 0 = longer duration{NL}- < 0 = shorter duration"
-    WBS_Onboarding_AddHelpComment comments, "Driving Logic", _
-        "RÙle : source principale ayant pilotÈ le calcul de la t‚che.{NL}Valeurs typiques :{NL}- ACTUAL{NL}- FORECAST{NL}- BASELINE{NL}- DEPENDENCY{NL}- SUMMARY{NL}{NL}UtilitÈ :{NL}- Permet de comprendre rapidement pourquoi la date calculÈe est celle-ci.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_DRIVING_LOGIC, _
+        "R√¥le : source principale ayant pilot√© le calcul de la t√¢che.{NL}Valeurs typiques :{NL}- ACTUAL{NL}- FORECAST{NL}- BASELINE{NL}- DEPENDENCY{NL}- SUMMARY{NL}{NL}Utilit√© :{NL}- Permet de comprendre rapidement pourquoi la date calcul√©e est celle-ci.", _
         "Purpose: main source driving the task calculation.{NL}Typical values:{NL}- ACTUAL{NL}- FORECAST{NL}- BASELINE{NL}- DEPENDENCY{NL}- SUMMARY{NL}{NL}Use:{NL}- Quickly explains why the calculated date is what it is."
-    WBS_Onboarding_AddHelpComment comments, "Critical Path", _
-        "RÙle : indicateur de chemin critique sur le rÈseau de planning actuel.{NL}Calcul / logique :{NL}- BasÈ sur le float total courant.{NL}- Une t‚che est critique si son Total Float est infÈrieur ou Ègal ‡ 0.{NL}{NL}UtilitÈ :{NL}- Aide ‡ identifier les t‚ches qui pilotent directement la date projet actuelle.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_CRITICAL_PATH, _
+        "R√¥le : indicateur de chemin critique sur le r√©seau de planning actuel.{NL}Calcul / logique :{NL}- Bas√© sur le float total courant.{NL}- Une t√¢che est critique si son Total Float est inf√©rieur ou √©gal √† 0.{NL}{NL}Utilit√© :{NL}- Aide √† identifier les t√¢ches qui pilotent directement la date projet actuelle.", _
         "Purpose: critical path indicator on the current schedule network.{NL}Calculation / logic:{NL}- Based on current total float.{NL}- A task is critical if its Total Float is less than or equal to 0.{NL}{NL}Use:{NL}- Helps identify tasks directly driving the current project finish date."
-    WBS_Onboarding_AddHelpComment comments, "Critical Path REX", _
-        "RÙle : indicateur de chemin critique sur l'Ètat de rÈfÈrence Baseline.{NL}Calcul / logique :{NL}- Utilise le mÍme graphe que les analytics Current.{NL}- Analyse les dates Baseline posÈes, sans compresser les gaps non exprimÈs en lag.{NL}- Une t‚che est critique si son Total Float REX est infÈrieur ou Ègal ‡ 0.{NL}{NL}UtilitÈ :{NL}- Sert ‡ l'analyse rÈtrospective ou comparative sur l'Ètat Baseline.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_CRITICAL_PATH_REX, _
+        "R√¥le : indicateur de chemin critique sur l'√©tat de r√©f√©rence Baseline.{NL}Calcul / logique :{NL}- Utilise le m√™me graphe que les analytics Current.{NL}- Analyse les dates Baseline pos√©es, sans compresser les gaps non exprim√©s en lag.{NL}- Une t√¢che est critique si son Total Float REX est inf√©rieur ou √©gal √† 0.{NL}{NL}Utilit√© :{NL}- Sert √† l'analyse r√©trospective ou comparative sur l'√©tat Baseline.", _
         "Purpose: critical path indicator on the Baseline reference state.{NL}Calculation / logic:{NL}- Uses the same graph as Current analytics.{NL}- Analyzes the placed Baseline dates without compressing gaps that are not expressed as lag.{NL}- A task is critical if its Total Float REX is less than or equal to 0.{NL}{NL}Use:{NL}- Used for retrospective or comparative analysis on the Baseline state."
-    WBS_Onboarding_AddHelpComment comments, "Longest Path", _
-        "RÙle : indique si la t‚che appartient au plus long chemin du rÈseau de planning actuel.{NL}Calcul / logique :{NL}- Le moteur marque LONGEST les t‚ches non terminÈes reliÈes ‡ la date de fin du rÈseau courant par des liens directeurs.{NL}{NL}UtilitÈ :{NL}- Identifie la sÈquence active la plus longue jusqu'‡ la fin du projet.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_LONGEST_PATH, _
+        "R√¥le : indique si la t√¢che appartient au plus long chemin du r√©seau de planning actuel.{NL}Calcul / logique :{NL}- Le moteur marque LONGEST les t√¢ches non termin√©es reli√©es √† la date de fin du r√©seau courant par des liens directeurs.{NL}{NL}Utilit√© :{NL}- Identifie la s√©quence active la plus longue jusqu'√† la fin du projet.", _
         "Purpose: indicates whether the task belongs to the longest path in the current schedule network.{NL}Calculation / logic:{NL}- The engine marks unfinished tasks as LONGEST when driving links connect them to the current network finish.{NL}{NL}Use:{NL}- Identifies the longest active sequence leading to project completion."
-    WBS_Onboarding_AddHelpComment comments, "Longest Path REX", _
-        "RÙle : sortie calculÈe rÈservÈe au plus long chemin sur l'Ètat de rÈfÈrence Baseline / REX.{NL}{NL}RËgles :{NL}- Ne pas renseigner manuellement.{NL}- Peut rester vide lorsque le workflow REX ne produit pas cet indicateur.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_LONGEST_PATH_REX, _
+        "R√¥le : sortie calcul√©e r√©serv√©e au plus long chemin sur l'√©tat de r√©f√©rence Baseline / REX.{NL}{NL}R√®gles :{NL}- Ne pas renseigner manuellement.{NL}- Peut rester vide lorsque le workflow REX ne produit pas cet indicateur.", _
         "Purpose: calculated output reserved for the longest path on the Baseline / REX reference state.{NL}{NL}Rules:{NL}- Do not enter a value manually.{NL}- May remain blank when the REX workflow does not produce this indicator."
-    WBS_Onboarding_AddHelpComment comments, "Total Float", _
-        "RÙle : marge totale sur le planning actuel.{NL}Calcul / logique :{NL}- Nombre de jours pendant lesquels la t‚che peut glisser sans dÈcaler la date de fin projet actuelle.{NL}{NL}Lecture :{NL}- 0 = critique{NL}- > 0 = marge disponible{NL}- < 0 = float nÈgatif, planning incohÈrent ou contraint", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_TOTAL_FLOAT, _
+        "R√¥le : marge totale sur le planning actuel.{NL}Calcul / logique :{NL}- Nombre de jours pendant lesquels la t√¢che peut glisser sans d√©caler la date de fin projet actuelle.{NL}{NL}Lecture :{NL}- 0 = critique{NL}- > 0 = marge disponible{NL}- < 0 = float n√©gatif, planning incoh√©rent ou contraint", _
         "Purpose: total float on the current schedule.{NL}Calculation / logic:{NL}- Number of days the task can slip without delaying the current project finish date.{NL}{NL}Reading:{NL}- 0 = critical{NL}- > 0 = available margin{NL}- < 0 = negative float, constrained or inconsistent schedule"
-    WBS_Onboarding_AddHelpComment comments, "Free Float", _
-        "RÙle : marge libre sur le planning actuel.{NL}{NL}Calcul / logique :{NL}- Nombre de jours pendant lesquels la t‚che peut glisser sans impacter le dÈbut au plus tÙt de la t‚che suivante.{NL}{NL}Cas particulier :{NL}- Si le float est nÈgatif, cela signifie que la t‚che ne respecte pas les contraintes du rÈseau.{NL}- La date de fin actuelle est dÈj‡ trop tardive par rapport aux exigences des successeurs (ou la durÈe est insuffisante).{NL}{NL}UtilitÈ :{NL}- Mesure la marge locale, plus fine que le Total Float.{NL}- Permet díidentifier immÈdiatement les incohÈrences ou contraintes impossibles dans le planning.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_FREE_FLOAT, _
+        "R√¥le : marge libre sur le planning actuel.{NL}{NL}Calcul / logique :{NL}- Nombre de jours pendant lesquels la t√¢che peut glisser sans impacter le d√©but au plus t√¥t de la t√¢che suivante.{NL}{NL}Cas particulier :{NL}- Si le float est n√©gatif, cela signifie que la t√¢che ne respecte pas les contraintes du r√©seau.{NL}- La date de fin actuelle est d√©j√† trop tardive par rapport aux exigences des successeurs (ou la dur√©e est insuffisante).{NL}{NL}Utilit√© :{NL}- Mesure la marge locale, plus fine que le Total Float.{NL}- Permet d‚Äôidentifier imm√©diatement les incoh√©rences ou contraintes impossibles dans le planning.", _
         "Purpose: free float on the current schedule.{NL}{NL}Calculation / logic:{NL}- Number of days the task can slip without affecting the earliest start of the next task.{NL}{NL}Special case:{NL}- A negative float means the task violates network constraints.{NL}- The current finish is already too late relative to successor requirements (or duration is insufficient).{NL}{NL}Use:{NL}- Measures local margin, more granular than Total Float.{NL}- Helps detect inconsistencies or infeasible constraints in the schedule."
-    WBS_Onboarding_AddHelpComment comments, "Total Float REX", _
-        "RÙle : marge totale sur l'Ètat de rÈfÈrence Baseline / REX.{NL}Calcul / logique :{NL}- Equivalent Baseline du Total Float, calculÈ avec le mÍme graphe que Current sur les dates Baseline posÈes.{NL}{NL}UtilitÈ :{NL}- Sert aux comparaisons et au retour d'expÈrience.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_TOTAL_FLOAT_REX, _
+        "R√¥le : marge totale sur l'√©tat de r√©f√©rence Baseline / REX.{NL}Calcul / logique :{NL}- Equivalent Baseline du Total Float, calcul√© avec le m√™me graphe que Current sur les dates Baseline pos√©es.{NL}{NL}Utilit√© :{NL}- Sert aux comparaisons et au retour d'exp√©rience.", _
         "Purpose: total float on the Baseline / REX reference state.{NL}Calculation / logic:{NL}- Baseline equivalent of Total Float, calculated with the same graph as Current on the placed Baseline dates.{NL}{NL}Use:{NL}- Used for comparisons and lessons learned analysis."
-    WBS_Onboarding_AddHelpComment comments, "Free Float REX", _
-        "RÙle : marge libre sur l'Ètat de rÈfÈrence Baseline / REX.{NL}Calcul / logique :{NL}- Equivalent Baseline du Free Float, calculÈ avec le mÍme graphe que Current sur les dates Baseline posÈes.{NL}{NL}UtilitÈ :{NL}- Sert ‡ l'analyse fine des marges sur l'Ètat Baseline.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_FREE_FLOAT_REX, _
+        "R√¥le : marge libre sur l'√©tat de r√©f√©rence Baseline / REX.{NL}Calcul / logique :{NL}- Equivalent Baseline du Free Float, calcul√© avec le m√™me graphe que Current sur les dates Baseline pos√©es.{NL}{NL}Utilit√© :{NL}- Sert √† l'analyse fine des marges sur l'√©tat Baseline.", _
         "Purpose: free float on the Baseline / REX reference state.{NL}Calculation / logic:{NL}- Baseline equivalent of Free Float, calculated with the same graph as Current on the placed Baseline dates.{NL}{NL}Use:{NL}- Used for detailed float analysis on the Baseline state."
-    WBS_Onboarding_AddHelpComment comments, "Deadline Float", _
-        "RÙle : marge entre la deadline de la t‚che et sa date de fin calculÈe.{NL}Calcul / logique :{NL}- Deadline Float = Deadline - Calculated Finish.{NL}{NL}Lecture :{NL}- 0 = ÈchÈance atteinte exactement.{NL}- > 0 = marge disponible avant l'ÈchÈance.{NL}- < 0 = ÈchÈance dÈpassÈe.", _
+    WBS_Onboarding_AddHelpComment comments, VTS_COL_DEADLINE_FLOAT, _
+        "R√¥le : marge entre la deadline de la t√¢che et sa date de fin calcul√©e.{NL}Calcul / logique :{NL}- Deadline Float = Deadline - Calculated Finish.{NL}{NL}Lecture :{NL}- 0 = √©ch√©ance atteinte exactement.{NL}- > 0 = marge disponible avant l'√©ch√©ance.{NL}- < 0 = √©ch√©ance d√©pass√©e.", _
         "Purpose: margin between the task deadline and its calculated finish date.{NL}Calculation / logic:{NL}- Deadline Float = Deadline - Calculated Finish.{NL}{NL}Reading:{NL}- 0 = deadline met exactly.{NL}- > 0 = available margin before the deadline.{NL}- < 0 = deadline exceeded."
 
     Set WBS_Onboarding_BuildHelpCommentMap = comments
@@ -951,7 +1073,7 @@ Private Function WBS_Onboarding_BuildHelpCommentMap() As Object
 End Function
 
 '------------------------------------------------------------------------------
-' FR: Ajoute une paire de textes localisÈs au catalogue sans exposer son stockage.
+' FR: Ajoute une paire de textes localis√©s au catalogue sans exposer son stockage.
 ' EN: Adds one localized text pair to the catalog without exposing its storage.
 '------------------------------------------------------------------------------
 Private Sub WBS_Onboarding_AddHelpComment( _
@@ -967,7 +1089,7 @@ Private Sub WBS_Onboarding_AddHelpComment( _
 End Sub
 
 '------------------------------------------------------------------------------
-' FR: Restaure les sauts de ligne d'un texte d'aide encodÈ dans le source VBA.
+' FR: Restaure les sauts de ligne d'un texte d'aide encod√© dans le source VBA.
 ' EN: Restores line breaks in help text encoded in the VBA source.
 '------------------------------------------------------------------------------
 Private Function WBS_Onboarding_DecodeHelpText(ByVal encodedText As String) As String
@@ -987,49 +1109,49 @@ Private Function WBS_Onboarding_BuildStatusMap() As Object
 
     requiredLabel = WBS_Onboarding_RequiredLabel()
     optionalLabel = WBS_L("Optionnel", "Optional")
-    calculatedLabel = WBS_L("CalculÈ", "Calculated")
+    calculatedLabel = WBS_L("Calcul√©", "Calculated")
 
     Set statuses = CreateObject("Scripting.Dictionary")
     statuses.CompareMode = vbTextCompare
 
-    statuses.Add "ID", requiredLabel
-    statuses.Add "WBS", requiredLabel
-    statuses.Add "Task Name", requiredLabel
-    statuses.Add "Task Description", optionalLabel
-    statuses.Add "Discipline", optionalLabel
-    statuses.Add "Supplier", optionalLabel
-    statuses.Add "Project", optionalLabel
-    statuses.Add "Cal", optionalLabel
-    statuses.Add "Task Type", optionalLabel
-    statuses.Add "S", "O"
-    statuses.Add "Comments", optionalLabel
-    statuses.Add "Predecessors WBS", requiredLabel & " G*"
-    statuses.Add "Weight (%)", requiredLabel & " S"
-    statuses.Add "% Progress", requiredLabel & " S"
-    statuses.Add "Baseline Start", requiredLabel & " G*"
-    statuses.Add "Baseline Duration", requiredLabel & " G*"
-    statuses.Add "Baseline Finish", calculatedLabel
-    statuses.Add "Actual Start", optionalLabel
-    statuses.Add "Actual Finish", optionalLabel
-    statuses.Add "Actual Duration", calculatedLabel
-    statuses.Add "Forecast Start", optionalLabel
-    statuses.Add "Forecast Finish", optionalLabel
-    statuses.Add "Calculated Start", calculatedLabel
-    statuses.Add "Calculated Finish", calculatedLabel
-    statuses.Add "Calculated Duration", calculatedLabel
-    statuses.Add "Start Variance", calculatedLabel
-    statuses.Add "Finish Variance", calculatedLabel
-    statuses.Add "Duration Variance", calculatedLabel
-    statuses.Add "Driving Logic", calculatedLabel
-    statuses.Add "Critical Path", calculatedLabel
-    statuses.Add "Critical Path REX", calculatedLabel
-    statuses.Add "Longest Path", calculatedLabel
-    statuses.Add "Longest Path REX", calculatedLabel
-    statuses.Add "Total Float", calculatedLabel
-    statuses.Add "Free Float", calculatedLabel
-    statuses.Add "Total Float REX", calculatedLabel
-    statuses.Add "Free Float REX", calculatedLabel
-    statuses.Add "Deadline Float", calculatedLabel
+    statuses.Add VTS_COL_ID, requiredLabel
+    statuses.Add VTS_COL_WBS, requiredLabel
+    statuses.Add VTS_COL_TASK_NAME, requiredLabel
+    statuses.Add VTS_COL_TASK_DESCRIPTION, optionalLabel
+    statuses.Add VTS_COL_DISCIPLINE, optionalLabel
+    statuses.Add VTS_COL_SUPPLIER, optionalLabel
+    statuses.Add VTS_COL_PROJECT, optionalLabel
+    statuses.Add VTS_COL_CAL, optionalLabel
+    statuses.Add VTS_COL_TASK_TYPE, optionalLabel
+    statuses.Add VTS_COL_S, "O"
+    statuses.Add VTS_COL_COMMENTS, optionalLabel
+    statuses.Add VTS_COL_PREDECESSORS_WBS, requiredLabel & " G*"
+    statuses.Add VTS_COL_WEIGHT_PERCENT, requiredLabel & " S"
+    statuses.Add VTS_COL_PROGRESS_PERCENT, requiredLabel & " S"
+    statuses.Add VTS_COL_BASELINE_START, requiredLabel & " G*"
+    statuses.Add VTS_COL_BASELINE_DURATION, requiredLabel & " G*"
+    statuses.Add VTS_COL_BASELINE_FINISH, calculatedLabel
+    statuses.Add VTS_COL_ACTUAL_START, optionalLabel
+    statuses.Add VTS_COL_ACTUAL_FINISH, optionalLabel
+    statuses.Add VTS_COL_ACTUAL_DURATION, calculatedLabel
+    statuses.Add VTS_COL_FORECAST_START, optionalLabel
+    statuses.Add VTS_COL_FORECAST_FINISH, optionalLabel
+    statuses.Add VTS_COL_CALCULATED_START, calculatedLabel
+    statuses.Add VTS_COL_CALCULATED_FINISH, calculatedLabel
+    statuses.Add VTS_COL_CALCULATED_DURATION, calculatedLabel
+    statuses.Add VTS_COL_START_VARIANCE, calculatedLabel
+    statuses.Add VTS_COL_FINISH_VARIANCE, calculatedLabel
+    statuses.Add VTS_COL_DURATION_VARIANCE, calculatedLabel
+    statuses.Add VTS_COL_DRIVING_LOGIC, calculatedLabel
+    statuses.Add VTS_COL_CRITICAL_PATH, calculatedLabel
+    statuses.Add VTS_COL_CRITICAL_PATH_REX, calculatedLabel
+    statuses.Add VTS_COL_LONGEST_PATH, calculatedLabel
+    statuses.Add VTS_COL_LONGEST_PATH_REX, calculatedLabel
+    statuses.Add VTS_COL_TOTAL_FLOAT, calculatedLabel
+    statuses.Add VTS_COL_FREE_FLOAT, calculatedLabel
+    statuses.Add VTS_COL_TOTAL_FLOAT_REX, calculatedLabel
+    statuses.Add VTS_COL_FREE_FLOAT_REX, calculatedLabel
+    statuses.Add VTS_COL_DEADLINE_FLOAT, calculatedLabel
 
     Set WBS_Onboarding_BuildStatusMap = statuses
 
@@ -1071,7 +1193,7 @@ Private Sub WBS_Onboarding_FormatStatusCell(ByVal cell As Range)
 End Sub
 
 '------------------------------------------------------------------------------
-' FR: Affiche le guide gÈnÈral WBS dans O1:R2 en respectant la langue active.
+' FR: Affiche le guide g√©n√©ral WBS dans O1:R2 en respectant la langue active.
 ' EN: Displays the general WBS guide in O1:R2 using the active language.
 '------------------------------------------------------------------------------
 Private Sub WBS_Onboarding_WriteQuickStart(ByVal ws As Worksheet)
@@ -1136,6 +1258,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     Dim gap As Double
 
     Set ws = ThisWorkbook.Worksheets("WBS")
+    WBS_SetLanguage Settings_GetOwnerLanguage("WBS")
 
     Ensure_WBS_Onboarding_Guide ws, False
 
@@ -1159,7 +1282,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     CreateOrUpdateWBSFloatingButton _
         ws, _
         "btn_WBS_Planning", _
-        "Update" & vbCrLf & "Planning", _
+        WBS_L("Mettre √† jour" & vbCrLf & "Planning", "Update" & vbCrLf & "Planning"), _
         "Run_Planning_Update", _
         startLeft, _
         topPos, _
@@ -1170,7 +1293,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     CreateOrUpdateWBSFloatingButton _
         ws, _
         "btn_WBS_Gantt", _
-        "Update" & vbCrLf & "Gantt", _
+        WBS_L("Mettre √† jour" & vbCrLf & "Gantt", "Update" & vbCrLf & "Gantt"), _
         "Run_Gantt_Update", _
         startLeft + btnWidthGreen + gap, _
         topPos, _
@@ -1181,7 +1304,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     CreateOrUpdateWBSFloatingButton _
         ws, _
         "btn_WBS_SCurve", _
-        "Update" & vbCrLf & "S-Curve", _
+        WBS_L("Mettre √† jour" & vbCrLf & "S-Curve", "Update" & vbCrLf & "S-Curve"), _
         "Run_SCurve_Update", _
         startLeft + (btnWidthGreen + gap) * 2, _
         topPos, _
@@ -1192,7 +1315,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     CreateOrUpdateWBSFloatingButton _
         ws, _
         "btn_WBS_ForcedPlanning", _
-        "Forced" & vbCrLf & "Planning Update", _
+        WBS_L("M√†J forc√©e" & vbCrLf & "Planning", "Forced" & vbCrLf & "Planning Update"), _
         "Run_Forced_Planning_Update", _
         startLeft + (btnWidthGreen + gap) * 3, _
         topPos, _
@@ -1203,7 +1326,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     CreateOrUpdateWBSFloatingButton _
         ws, _
         "btn_WBS_Full", _
-        "Full" & vbCrLf & "Update", _
+        WBS_L("Mise √† jour" & vbCrLf & "compl√®te", "Full" & vbCrLf & "Update"), _
         "Run_Full_Update", _
         startLeft + (btnWidthGreen + gap) * 3 + btnWidthForced + gap, _
         topPos, _
@@ -1214,7 +1337,7 @@ Public Sub Ensure_WBS_Main_Buttons()
     CreateOrUpdateWBSFloatingButton _
         ws, _
         "btn_WBS_ResetPlanning", _
-        "Reset" & vbCrLf & "Planning", _
+        WBS_L("R√©initialiser" & vbCrLf & "Planning", "Reset" & vbCrLf & "Planning"), _
         "Reset_Planning", _
         startLeft + (btnWidthGreen + gap) * 3 + btnWidthForced + gap + btnWidthRed + gap, _
         topPos, _
@@ -1222,7 +1345,12 @@ Public Sub Ensure_WBS_Main_Buttons()
         btnHeight, _
         RGB(192, 0, 0)
 
-    WBS_ApplyLanguage
+    WBS_SetCellValueIfDifferent ws.Range("L1"), _
+        WBS_L("Fin baseline" & vbCrLf & "projet", "Project Baseline" & vbCrLf & "Finish")
+    WBS_SetCellValueIfDifferent ws.Range("M1"), _
+        WBS_L("Fin calcul√©e" & vbCrLf & "projet", "Project" & vbCrLf & "Calculated Finish")
+    WBS_SetCellValueIfDifferent ws.Range("N1"), _
+        WBS_L("Retard projet" & vbCrLf & "(jours)", "Project Delay" & vbCrLf & "(days)")
 
 End Sub
 
@@ -1246,17 +1374,17 @@ Public Sub WBS_ApplyLanguage(Optional ByVal languageCode As String = "")
         EnsureWBSLanguageInitialized
     End If
 
-    WBS_SetShapeText ws, "btn_WBS_Planning", WBS_L("Mettre ‡ jour" & vbCrLf & "Planning", "Update" & vbCrLf & "Planning")
-    WBS_SetShapeText ws, "btn_WBS_Gantt", WBS_L("Mettre ‡ jour" & vbCrLf & "Gantt", "Update" & vbCrLf & "Gantt")
-    WBS_SetShapeText ws, "btn_WBS_SCurve", WBS_L("Mettre ‡ jour" & vbCrLf & "S-Curve", "Update" & vbCrLf & "S-Curve")
-    WBS_SetShapeText ws, "btn_WBS_ForcedPlanning", WBS_L("M‡J forcÈe" & vbCrLf & "Planning", "Forced" & vbCrLf & "Planning Update")
-    WBS_SetShapeText ws, "btn_WBS_Full", WBS_L("Mise ‡ jour" & vbCrLf & "complËte", "Full" & vbCrLf & "Update")
-    WBS_SetShapeText ws, "btn_WBS_ResetPlanning", WBS_L("RÈinitialiser" & vbCrLf & "Planning", "Reset" & vbCrLf & "Planning")
+    WBS_SetShapeText ws, "btn_WBS_Planning", WBS_L("Mettre √† jour" & vbCrLf & "Planning", "Update" & vbCrLf & "Planning")
+    WBS_SetShapeText ws, "btn_WBS_Gantt", WBS_L("Mettre √† jour" & vbCrLf & "Gantt", "Update" & vbCrLf & "Gantt")
+    WBS_SetShapeText ws, "btn_WBS_SCurve", WBS_L("Mettre √† jour" & vbCrLf & "S-Curve", "Update" & vbCrLf & "S-Curve")
+    WBS_SetShapeText ws, "btn_WBS_ForcedPlanning", WBS_L("M√†J forc√©e" & vbCrLf & "Planning", "Forced" & vbCrLf & "Planning Update")
+    WBS_SetShapeText ws, "btn_WBS_Full", WBS_L("Mise √† jour" & vbCrLf & "compl√®te", "Full" & vbCrLf & "Update")
+    WBS_SetShapeText ws, "btn_WBS_ResetPlanning", WBS_L("R√©initialiser" & vbCrLf & "Planning", "Reset" & vbCrLf & "Planning")
 
     WBS_SetCellValueIfDifferent ws.Range("L1"), _
         WBS_L("Fin baseline" & vbCrLf & "projet", "Project Baseline" & vbCrLf & "Finish")
     WBS_SetCellValueIfDifferent ws.Range("M1"), _
-        WBS_L("Fin calculÈe" & vbCrLf & "projet", "Project" & vbCrLf & "Calculated Finish")
+        WBS_L("Fin calcul√©e" & vbCrLf & "projet", "Project" & vbCrLf & "Calculated Finish")
     WBS_SetCellValueIfDifferent ws.Range("N1"), _
         WBS_L("Retard projet" & vbCrLf & "(jours)", "Project Delay" & vbCrLf & "(days)")
 
@@ -1268,10 +1396,7 @@ Public Sub WBS_ApplyLanguage(Optional ByVal languageCode As String = "")
     Exit Sub
 
 ErrHandler:
-    WBSButtons_ShowConsoleError _
-        "WBS_ApplyLanguage", _
-        "Erreur dans WBS_ApplyLanguage : " & Err.Description, _
-        "Error in WBS_ApplyLanguage: " & Err.Description
+    Err.Raise Err.Number, "WBS_ApplyLanguage", Err.Description
 
 End Sub
 
@@ -1284,6 +1409,9 @@ Public Sub WBS_OnboardingInstrumentation_Reset()
     gWBSOnboardingLocalizedCheckCount = 0
     gWBSOnboardingLocalizedRebuildCount = 0
     gWBSOnboardingStructuralMutationCount = 0
+    gWBSOnboardingThreadedReadCount = 0
+    gWBSOnboardingThreadedAddCount = 0
+    gWBSOnboardingThreadedClearCount = 0
 
 End Sub
 
@@ -1296,7 +1424,11 @@ Public Function WBS_OnboardingInstrumentation_Snapshot() As String
     WBS_OnboardingInstrumentation_Snapshot = _
         "checks=" & CStr(gWBSOnboardingLocalizedCheckCount) & _
         ";rebuilds=" & CStr(gWBSOnboardingLocalizedRebuildCount) & _
-        ";structural=" & CStr(gWBSOnboardingStructuralMutationCount)
+        ";structural=" & CStr(gWBSOnboardingStructuralMutationCount) & _
+        ";threadedReads=" & CStr(gWBSOnboardingThreadedReadCount) & _
+        ";threadedAdds=" & CStr(gWBSOnboardingThreadedAddCount) & _
+        ";threadedClears=" & CStr(gWBSOnboardingThreadedClearCount) & _
+        ";threadedSupport=" & ExcelCompatibility_ThreadedCommentsProbeStatus()
 
 End Function
 
@@ -1478,12 +1610,12 @@ Private Sub Ensure_WBS_TaskType_Input_Setup(ByVal ws As Worksheet)
     If tbl Is Nothing Then Exit Sub
     If tbl.DataBodyRange Is Nothing Then Exit Sub
 
-    If Not WBS_TableHasColumn(tbl, "Task Type") Then
+    If Not WBS_TableHasSchemaColumn(tbl, VTS_COL_TASK_TYPE) Then
         Err.Raise vbObjectError + 2310, "Ensure_WBS_TaskType_Input_Setup", _
             "Missing required WBS input column: Task Type"
     End If
 
-    Set rng = tbl.ListColumns("Task Type").DataBodyRange
+    Set rng = SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_TASK_TYPE).DataBodyRange
 
     oldEvents = Application.EnableEvents
     Application.EnableEvents = False
@@ -1582,12 +1714,12 @@ Private Function WBSButtons_RowHasTaskIdentity( _
     If tbl.DataBodyRange Is Nothing Then Exit Function
     If rowIndex < 1 Or rowIndex > tbl.ListRows.Count Then Exit Function
 
-    If WBS_TableHasColumn(tbl, "ID") Then
-        idVal = Trim$(CStr(tbl.ListColumns("ID").DataBodyRange.Cells(rowIndex, 1).value))
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_ID) Then
+        idVal = Trim$(CStr(SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_ID).DataBodyRange.Cells(rowIndex, 1).value))
     End If
 
-    If WBS_TableHasColumn(tbl, "WBS") Then
-        wbsVal = Trim$(CStr(tbl.ListColumns("WBS").DataBodyRange.Cells(rowIndex, 1).value))
+    If WBS_TableHasSchemaColumn(tbl, VTS_COL_WBS) Then
+        wbsVal = Trim$(CStr(SchemaListColumn(tbl, VTS_TABLE_WBS, VTS_COL_WBS).DataBodyRange.Cells(rowIndex, 1).value))
     End If
 
     wbsVal = Replace$(wbsVal, ",", ".")
@@ -1600,7 +1732,14 @@ End Function
 ' EN: Returns the WBS Table Has Column reference without mutating input data.
 '------------------------------------------------------------------------------
 
-Private Function WBS_TableHasColumn(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
+Private Function WBS_TableHasSchemaColumn(ByVal tbl As ListObject, ByVal columnKey As String) As Boolean
+
+    WBS_TableHasSchemaColumn = WBS_TableHasPhysicalColumn( _
+        tbl, SchemaCurrentColumnTitle(VTS_TABLE_WBS, columnKey))
+
+End Function
+
+Private Function WBS_TableHasPhysicalColumn(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
 
     Dim col As ListColumn
 
@@ -1608,7 +1747,7 @@ Private Function WBS_TableHasColumn(ByVal tbl As ListObject, ByVal columnName As
     Set col = tbl.ListColumns(columnName)
     On Error GoTo 0
 
-    WBS_TableHasColumn = Not col Is Nothing
+    WBS_TableHasPhysicalColumn = Not col Is Nothing
 
 End Function
 

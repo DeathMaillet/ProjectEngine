@@ -19,35 +19,35 @@ Option Explicit
 
 
 ' ============================================================
-' VARIANCE ENGINE – HYBRID BASELINE APPROACH
+' VARIANCE ENGINE â€“ HYBRID BASELINE APPROACH
 '
 ' Objectif :
 ' Calculer les variances Start / Finish / Duration directement
 ' en VBA, sans formule Excel, pour supporter :
-' - les tâches sans baseline complète ;
-' - les tâches dont la baseline peut être reconstruite par logique ;
-' - les tâches summary / parents.
+' - les tÃ¢ches sans baseline complÃ¨te ;
+' - les tÃ¢ches dont la baseline peut Ãªtre reconstruite par logique ;
+' - les tÃ¢ches summary / parents.
 '
 ' Principe :
 '
-' 1. Référence baseline des tâches feuille
+' 1. RÃ©fÃ©rence baseline des tÃ¢ches feuille
 '
 '    - Si Baseline Start + Baseline Finish existent :
-'        on utilise ces dates saisies comme référence officielle PM.
+'        on utilise ces dates saisies comme rÃ©fÃ©rence officielle PM.
 '
-'    - Sinon, si Baseline Duration existe et que les dépendances
-'      permettent de positionner la tâche :
-'        on reconstruit une baseline théorique à partir du réseau
-'        logique déjà développé dans tbl_LOGIC_LINKS.
+'    - Sinon, si Baseline Duration existe et que les dÃ©pendances
+'      permettent de positionner la tÃ¢che :
+'        on reconstruit une baseline thÃ©orique Ã  partir du rÃ©seau
+'        logique dÃ©jÃ  dÃ©veloppÃ© dans tbl_LOGIC_LINKS.
 '
 '    - Sinon :
 '        la variance reste vide.
 '
 '
-' 2. Référence baseline des tâches summary
+' 2. RÃ©fÃ©rence baseline des tÃ¢ches summary
 '
-'    Les parents ne doivent pas être saisis comme input planning.
-'    Leur baseline de référence est donc calculée par roll-up :
+'    Les parents ne doivent pas Ãªtre saisis comme input planning.
+'    Leur baseline de rÃ©fÃ©rence est donc calculÃ©e par roll-up :
 '
 '        Start    = min(Baseline Ref Start des enfants directs/indirects)
 '        Finish   = max(Baseline Ref Finish des enfants directs/indirects)
@@ -61,22 +61,22 @@ Option Explicit
 '        Duration Variance = Calculated Duration - Baseline Ref Duration
 '
 '
-' 4. Sécurité WBS
+' 4. SÃ©curitÃ© WBS
 '
-'    Le WBS est considéré comme une table input PM.
-'    Ce module NE RÉÉCRIT JAMAIS toute la table WBS.
-'    Il écrit uniquement les trois colonnes autorisées :
+'    Le WBS est considÃ©rÃ© comme une table input PM.
+'    Ce module NE RÃ‰Ã‰CRIT JAMAIS toute la table WBS.
+'    Il Ã©crit uniquement les trois colonnes autorisÃ©es :
 '
 '        - Start Variance
 '        - Finish Variance
 '        - Duration Variance
 '
-'    Le format de ces trois colonnes est forcé en numérique "0"
-'    afin d'éviter qu'Excel transforme les jours de variance en dates
+'    Le format de ces trois colonnes est forcÃ© en numÃ©rique "0"
+'    afin d'Ã©viter qu'Excel transforme les jours de variance en dates
 '    type 01/01/1900 ou 12:00:00 AM.
 '
-'    La colonne WBS est uniquement lue. Si nécessaire, elle est
-'    normalisée en mémoire uniquement ("," -> ".") pour fiabiliser
+'    La colonne WBS est uniquement lue. Si nÃ©cessaire, elle est
+'    normalisÃ©e en mÃ©moire uniquement ("," -> ".") pour fiabiliser
 '    les comparaisons parent/enfant.
 '
 ' ============================================================
@@ -122,19 +122,19 @@ Public Sub Compute_And_Push_Variances(Optional ByVal consoleMessages As Collecti
     Set mapWBS = CanonicalIdentity_BuildColumnMap(tblWBS)
 
     requiredCols = Array( _
-        "ID", _
-        "WBS", _
-        "Predecessors WBS", _
-        "Baseline Start", _
-        "Baseline Duration", _
-        "Baseline Finish", _
-        "Calculated Start", _
-        "Calculated Finish", _
-        "Calculated Duration", _
-        "Driving Logic", _
-        "Start Variance", _
-        "Finish Variance", _
-        "Duration Variance" _
+        VTS_COL_ID, _
+        VTS_COL_WBS, _
+        VTS_COL_PREDECESSORS_WBS, _
+        VTS_COL_BASELINE_START, _
+        VTS_COL_BASELINE_DURATION, _
+        VTS_COL_BASELINE_FINISH, _
+        VTS_COL_CALCULATED_START, _
+        VTS_COL_CALCULATED_FINISH, _
+        VTS_COL_CALCULATED_DURATION, _
+        VTS_COL_DRIVING_LOGIC, _
+        VTS_COL_START_VARIANCE, _
+        VTS_COL_FINISH_VARIANCE, _
+        VTS_COL_DURATION_VARIANCE _
     )
 
     Core_RequireColumns mapWBS, requiredCols, "Compute_And_Push_Variances / tbl_WBS"
@@ -201,8 +201,8 @@ Private Sub Variance_BuildWbsIndexes( _
 
     For r = 1 To tblWBS.ListRows.Count
 
-        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("ID")).value))
-        wbsVal = NormalizeWBSCode(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("WBS")).value))
+        idVal = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_ID)).value))
+        wbsVal = NormalizeWBSCode(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_WBS)).value))
 
         If idVal <> "" Then rowById(idVal) = r
         If wbsVal <> "" Then rowByWbs(wbsVal) = r
@@ -215,7 +215,7 @@ Private Sub Variance_BuildWbsIndexes( _
 
     For r = 1 To tblWBS.ListRows.Count
 
-        wbsVal = NormalizeWBSCode(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("WBS")).value))
+        wbsVal = NormalizeWBSCode(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_WBS)).value))
 
         If wbsVal <> "" Then
 
@@ -304,9 +304,9 @@ Private Sub Variance_BuildLeafBaselineReferences( _
 
             r = CLng(key)
 
-            bs = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Baseline Start")).value)
-            bf = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Baseline Finish")).value)
-            bd = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Baseline Duration")).value)
+            bs = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_BASELINE_START)).value)
+            bf = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_BASELINE_FINISH)).value)
+            bd = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_BASELINE_DURATION)).value)
 
             If HasValue(bs) And HasValue(bf) Then
 
@@ -329,7 +329,7 @@ Private Sub Variance_BuildLeafBaselineReferences( _
             If Not IsNumeric(bd) Then GoTo NextRemainingTask
             If CDbl(bd) <= 0 Then GoTo NextRemainingTask
 
-            predText = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS("Predecessors WBS")).value))
+            predText = Trim$(CStr(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_PREDECESSORS_WBS)).value))
 
             If predText = "" Then GoTo NextRemainingTask
 
@@ -516,9 +516,9 @@ Private Sub Variance_BuildOutputArrays( _
 
     For r = 1 To tblWBS.ListRows.Count
 
-        cs = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Start")).value)
-        cf = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Finish")).value)
-        cd = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS("Calculated Duration")).value)
+        cs = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_START)).value)
+        cf = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_FINISH)).value)
+        cd = GetCellValue(tblWBS.DataBodyRange.Cells(r, mapWBS(VTS_COL_CALCULATED_DURATION)).value)
 
         If HasValue(cs) And refStartByRow.Exists(CStr(r)) Then
             outSV(r, 1) = CLng(CDbl(cs) - CDbl(refStartByRow(CStr(r))))
@@ -569,13 +569,13 @@ Private Sub Variance_WriteOutputArraysToWBS( _
     writeScopeToken = OpenAuthorizedWBSWriteScope( _
         "Variance_WriteOutputArraysToWBS", allowedFields)
 
-    tblWBS.ListColumns("Start Variance").DataBodyRange.NumberFormat = "0"
-    tblWBS.ListColumns("Finish Variance").DataBodyRange.NumberFormat = "0"
-    tblWBS.ListColumns("Duration Variance").DataBodyRange.NumberFormat = "0"
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_START_VARIANCE).DataBodyRange.NumberFormat = "0"
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_FINISH_VARIANCE).DataBodyRange.NumberFormat = "0"
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_DURATION_VARIANCE).DataBodyRange.NumberFormat = "0"
 
-    tblWBS.ListColumns("Start Variance").DataBodyRange.value = outSV
-    tblWBS.ListColumns("Finish Variance").DataBodyRange.value = outFV
-    tblWBS.ListColumns("Duration Variance").DataBodyRange.value = outDV
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_START_VARIANCE).DataBodyRange.value = outSV
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_FINISH_VARIANCE).DataBodyRange.value = outFV
+    SchemaListColumn(tblWBS, VTS_TABLE_WBS, VTS_COL_DURATION_VARIANCE).DataBodyRange.value = outDV
 
 SafeExit:
     On Error Resume Next
